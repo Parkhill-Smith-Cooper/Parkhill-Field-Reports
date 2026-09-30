@@ -1,0 +1,61 @@
+/*
+ * Global rules that are clearer as plain CSS than as Chakra style objects:
+ * media-query-scoped raw selectors and the print stylesheet.
+ *
+ * Everything colour- or token-related belongs in `src/theme/index.ts`.
+ */
+
+/*
+ * iOS Safari force-zooms the viewport whenever a focused form control has a
+ * font size below 16px, and never zooms back out. That single behaviour is
+ * most of what makes a web form feel like a desktop page squeezed onto a
+ * phone, so the floor is enforced on small screens regardless of the control
+ * size a component asked for. Desktop keeps the smaller, denser type.
+ */
+@media (max-width: 48em) {
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+}
+
+/*
+ * The report preview is designed to survive the browser's own Print-to-PDF, so
+ * a usable PDF is available before real PDF generation is built. Application
+ * chrome is marked `data-print="hide"`; the report container is marked
+ * `data-print="document"`.
+ */
+@media print {
+  @page {
+    margin: 0.6in;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    /* Keep the brand rules and borders visible in the printed output. */
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  [data-print="hide"] {
+    display: none !important;
+  }
+
+  /* On paper the page itself is the frame, so drop the on-screen card. */
+  [data-print="document"] {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Never split a photo or an observation block across two pages. */
+  [data-print="avoid-break"] {
+    break-inside: avoid;
+  }
+}
