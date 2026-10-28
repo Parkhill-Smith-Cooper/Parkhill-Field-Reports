@@ -61,5 +61,5 @@ export const config = {
   // Everything except Next's own assets and the logo. The logo is excluded by
   // name so it still renders on the sign-in page, where the visitor is by
   // definition not yet authenticated.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|parkhill-logo.svg).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|parkhill-logo.png).*)"],
 };

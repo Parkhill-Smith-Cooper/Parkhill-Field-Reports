@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 
 import { UserMenu } from "@/components/UserMenu";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth/session";
-import { LOGO_SRC } from "@/lib/branding";
+import { APP_NAME, LOGO_SRC } from "@/lib/branding";
 
 /**
  * Application header.
@@ -38,14 +38,14 @@ export async function AppHeader() {
         gap="4"
       >
         <HStack gap={{ base: 3, md: 4 }} minW="0">
-          <Link href="/projects" aria-label="ParkhillCXField home">
+          <Link href="/projects" aria-label={`${APP_NAME} home`}>
             <Image
               src={LOGO_SRC}
               alt="Parkhill"
-              width={232}
-              height={40}
+              width={250}
+              height={85}
               priority
-              style={{ height: "1.75rem", width: "auto" }}
+              style={{ height: "2.25rem", width: "auto" }}
             />
           </Link>
 
@@ -66,7 +66,7 @@ export async function AppHeader() {
             textTransform="uppercase"
             whiteSpace="nowrap"
           >
-            Commissioning Field
+            {APP_NAME}
           </Text>
         </HStack>
 

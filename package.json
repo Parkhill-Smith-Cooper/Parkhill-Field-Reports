@@ -18,6 +18,7 @@
     "@emotion/react": "11.14.0",
     "@node-saml/node-saml": "^5.1.0",
     "jose": "^6.2.12",
+    "mssql": "^12.7.10",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@chakra-ui/cli": "3.37.0",
+    "@types/mssql": "^12.3.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

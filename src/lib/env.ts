@@ -47,4 +47,12 @@ export const env = {
   get storageContainer() {
     return optional("AZURE_STORAGE_CONTAINER", "field-photos");
   },
+  /** The one secret in the app. Server-only; never a `NEXT_PUBLIC_*` name. */
+  get openaiApiKey() {
+    return required("OPENAI_API_KEY");
+  },
+  /** Must be a vision-capable model: the cause suggestions read the photos. */
+  get openaiModel() {
+    return optional("OPENAI_MODEL", "gpt-5.5");
+  },
 };

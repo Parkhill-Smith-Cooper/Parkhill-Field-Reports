@@ -72,6 +72,7 @@ export function ReportPreview({
         {/* Header */}
         <Stack gap="4">
           <Stack
+            data-print-layout="header"
             direction={{ base: "column", sm: "row" }}
             justify="space-between"
             align={{ base: "flex-start", sm: "flex-end" }}
@@ -91,14 +92,19 @@ export function ReportPreview({
               textTransform="uppercase"
               color="fg"
             >
-              Commissioning Field Observation
+              Field Observation
             </Text>
           </Stack>
           <Box borderBottomWidth="2px" borderColor="brand.solid" />
         </Stack>
 
         {/* Identifying information */}
-        <SimpleGrid columns={{ base: 1, sm: 2, md: 3 }} gapX="8" gapY="4">
+        <SimpleGrid
+          data-print-layout="grid-3"
+          columns={{ base: 1, sm: 2, md: 3 }}
+          gapX="8"
+          gapY="4"
+        >
           <ReportField
             label="Project"
             value={
@@ -123,7 +129,7 @@ export function ReportPreview({
 
         {photos.length > 0 && (
           <ReportSection title="Field Photos">
-            <SimpleGrid columns={{ base: 1, sm: 2 }} gap="4">
+            <SimpleGrid data-print-layout="grid-2" columns={{ base: 1, sm: 2 }} gap="4">
               {photos.map((photo) => (
                 <Stack key={photo.id} gap="1.5" data-print="avoid-break">
                   <AspectRatio ratio={4 / 3}>

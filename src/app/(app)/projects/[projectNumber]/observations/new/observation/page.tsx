@@ -48,7 +48,11 @@ export default function ObservationStepPage() {
 
     setGenerating(true);
     try {
-      const causes = await fetchFailureCauses(projectNumber, draft.form);
+      const causes = await fetchFailureCauses(
+        projectNumber,
+        draft.form,
+        draft.photos,
+      );
       setCauses(causes);
       router.push(wizardPath(projectNumber, "causes"));
     } catch (error) {

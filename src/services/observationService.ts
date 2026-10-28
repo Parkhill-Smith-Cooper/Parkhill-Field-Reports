@@ -2,7 +2,7 @@
 
 import type { SaveObservationInput, SavedObservation } from "@/types";
 
-import { apiGet, apiPost } from "./apiClient";
+import { apiGet, apiPost, apiPut } from "./apiClient";
 
 function base(projectNumber: string): string {
   return `/api/projects/${encodeURIComponent(projectNumber)}/observations`;
@@ -33,6 +33,17 @@ export async function saveObservation(
 ): Promise<SavedObservation> {
   const { observation } = await apiPost<{ observation: SavedObservation }>(
     base(projectNumber),
+    input,
+  );
+  return observation;
+}
+
+export async function updateObservation(
+  projectNumber: string,
+  input: SaveObservationInput,
+): Promise<SavedObservation> {
+  const { observation } = await apiPut<{ observation: SavedObservation }>(
+    `${base(projectNumber)}/${encodeURIComponent(input.id)}`,
     input,
   );
   return observation;

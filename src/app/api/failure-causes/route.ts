@@ -1,32 +1,14 @@
+import { suggestFailureCauses } from "@/lib/ai/suggestions";
 import { apiError, handleRoute } from "@/lib/apiResponse";
 import { newItemId } from "@/lib/ids";
 import { readSuggestionRequest } from "@/lib/suggestionRequest";
-import { buildMockCauses } from "@/mocks/failureCauses";
 import type { SelectableItem } from "@/types";
 
 /**
- * Step 2 suggestions.
- *
- * ============================================================================
- * THIS IS ONE OF THE TWO POINTS WHERE AI GETS CONNECTED.
- *
- * Today it returns placeholder data from `src/mocks/failureCauses.ts`.
- * To connect a real model, replace the `buildMockCauses(...)` call below with a
- * server-side request that reads its key from `process.env` - for example
- * `process.env.OPENAI_API_KEY`, set as an Azure App Service application
- * setting.
- *
- * Nothing above this file changes. The browser calls this route, never a model
- * provider directly, so no credential ever reaches client code. Keep it that
- * way: never import an AI SDK into a component, and never expose a key through
- * a `NEXT_PUBLIC_*` variable.
- * ============================================================================
+ * Step 2 suggestions: potential failure causes, from the observation text and
+ * the photos. The model call lives in `src/lib/ai/suggestions.ts`; the browser
+ * only ever talks to this route, so the OpenAI key never reaches client code.
  */
-
-/** Enough delay that the loading state is genuinely visible while testing the
- *  workflow. A real model call will take at least this long. */
-const MOCK_LATENCY_MS = 700;
-
 export async function POST(request: Request) {
   return handleRoute("generate potential failure causes", async () => {
     const body: unknown = await request.json().catch(() => null);
@@ -39,18 +21,16 @@ export async function POST(request: Request) {
       );
     }
 
-    await new Promise((resolve) => setTimeout(resolve, MOCK_LATENCY_MS));
-
-    const causes: SelectableItem[] = buildMockCauses(suggestionRequest).map(
-      (text) => ({
-        id: newItemId(),
-        text,
-        // Nothing is pre-selected: the engineer stays in control of every
-        // item that reaches the report.
-        selected: false,
-        isCustom: false,
-      }),
-    );
+    const causes: SelectableItem[] = (
+      await suggestFailureCauses(suggestionRequest)
+    ).map((text) => ({
+      id: newItemId(),
+      text,
+      // Nothing is pre-selected: the engineer stays in control of every
+      // item that reaches the report.
+      selected: false,
+      isCustom: false,
+    }));
 
     return Response.json({ causes });
   });

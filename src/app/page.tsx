@@ -5,7 +5,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { LuLogIn } from "react-icons/lu";
 
-import { LOGO_SRC } from "@/lib/branding";
+import { APP_NAME, LOGO_SRC } from "@/lib/branding";
 import { safeReturnTo } from "@/lib/auth/relayState";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth/session";
 
@@ -83,7 +83,7 @@ export default async function SignInPage({
           />
           <Stack gap="2">
             <Text fontSize="2xl" fontWeight="semibold" letterSpacing="-0.01em">
-              Commissioning Field
+              {APP_NAME}
             </Text>
             <Text fontSize="sm" color="fg.muted">
               Record a field observation, work through potential causes and

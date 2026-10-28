@@ -27,9 +27,33 @@
  * chrome is marked `data-print="hide"`; the report container is marked
  * `data-print="document"`.
  */
+/* Print-only content, such as the project report table, stays off screen. */
+[data-print="only"] {
+  display: none;
+}
+
 @media print {
   @page {
     margin: 0.6in;
+  }
+
+  /* A named page, so only content that asks for it is printed landscape. */
+  @page landscape {
+    size: landscape;
+    margin: 0.5in;
+  }
+
+  [data-print="only"] {
+    display: block !important;
+  }
+
+  /*
+   * Applied to the whole document rather than to the report element. A named
+   * page on an inner element forces a break before it (leaving a blank
+   * portrait first page) and lays out what precedes it at portrait width.
+   */
+  :root:has([data-print="landscape"]) {
+    page: landscape;
   }
 
   html,
@@ -52,6 +76,30 @@
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
+  }
+
+  /*
+   * The report is responsive on screen, but paper is always the desktop
+   * layout. Chrome evaluates breakpoints against a narrow print viewport, so
+   * without these the printed report collapses to its single-column phone
+   * layout.
+   */
+  [data-print-layout="header"] {
+    flex-direction: row !important;
+    align-items: flex-end !important;
+  }
+
+  [data-print-layout="pair"] {
+    flex-direction: row !important;
+    gap: 2rem !important;
+  }
+
+  [data-print-layout="grid-3"] {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  [data-print-layout="grid-2"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
   /* Never split a photo or an observation block across two pages. */

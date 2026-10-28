@@ -85,6 +85,8 @@ export type SaveObservationInput = ObservationForm & {
 /** Request body for both mock-AI endpoints. */
 export type SuggestionRequest = ObservationForm & {
   projectNumber: string;
+  /** Blob paths of the observation's photos, which the model looks at. */
+  photoPaths: string[];
   /** Sent only to the corrective-actions endpoint. */
   selectedCauses?: string[];
 };

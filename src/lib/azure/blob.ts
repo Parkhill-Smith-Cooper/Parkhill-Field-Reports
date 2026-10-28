@@ -81,6 +81,11 @@ export async function uploadPhoto(
   });
 }
 
+/** The bytes of one stored photo, for server-side use such as AI analysis. */
+export async function downloadPhoto(blobPath: string): Promise<Buffer> {
+  return container().getBlobClient(blobPath).downloadToBuffer();
+}
+
 /**
  * Fetching a delegation key is a network round trip, and one key can sign any
  * number of SAS tokens for hours. Caching it turns "render a report with eight

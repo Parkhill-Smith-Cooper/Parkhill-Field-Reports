@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 
 import { Toaster } from "@/components/ui/toaster";
+import { APP_NAME } from "@/lib/branding";
 
 import { Providers } from "./providers";
 
@@ -14,7 +15,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "ParkhillCXField",
+  title: APP_NAME,
   description:
     "Commissioning field observation tool for Parkhill engineers: record a field observation, work through potential failure causes and corrective actions, and produce a field report.",
 };

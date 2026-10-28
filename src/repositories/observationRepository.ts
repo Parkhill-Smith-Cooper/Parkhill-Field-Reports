@@ -92,3 +92,40 @@ export async function saveObservation(
   const { resource } = await observationsContainer().items.upsert(observation);
   return (resource as SavedObservation | undefined) ?? observation;
 }
+
+/**
+ * Replaces the editable content of an existing observation. Who created it and
+ * when are carried over from the stored record rather than trusted from the
+ * request. Returns `null` when there is no such observation, so an edit can
+ * never quietly create one.
+ */
+export async function updateObservation(
+  projectNumber: string,
+  input: SaveObservationInput,
+): Promise<SavedObservation | null> {
+  const existing = await getObservation(projectNumber, input.id);
+  if (!existing) return null;
+
+  const observation: SavedObservation = {
+    id: existing.id,
+    projectNumber,
+    equipment: input.equipment.trim(),
+    system: input.system.trim(),
+    location: input.location.trim(),
+    activity: input.activity.trim(),
+    observation: input.observation.trim(),
+    observedDate: input.observedDate,
+    photos: input.photos,
+    causes: input.causes,
+    actions: input.actions,
+    status: "final",
+    createdAt: existing.createdAt,
+    createdBy: existing.createdBy,
+    updatedAt: new Date().toISOString(),
+  };
+
+  const { resource } = await observationsContainer()
+    .item(existing.id, projectNumber)
+    .replace(observation);
+  return (resource as SavedObservation | undefined) ?? observation;
+}

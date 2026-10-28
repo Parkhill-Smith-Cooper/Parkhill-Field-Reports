@@ -41,6 +41,7 @@ export default function CausesStepPage() {
       const actions = await fetchCorrectiveActions(
         projectNumber,
         draft.form,
+        draft.photos,
         selected.map((cause) => cause.text),
       );
       setActions(actions);

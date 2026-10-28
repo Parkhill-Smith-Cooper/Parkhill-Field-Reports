@@ -1,6 +1,14 @@
 import { apiError, handleRoute } from "@/lib/apiResponse";
-import { isValidGeneratedId, isValidProjectNumber } from "@/lib/validation";
-import { getObservation } from "@/repositories/observationRepository";
+import {
+  isValidGeneratedId,
+  isValidProjectNumber,
+  validateSaveObservation,
+} from "@/lib/validation";
+import {
+  getObservation,
+  updateObservation,
+} from "@/repositories/observationRepository";
+import type { SaveObservationInput } from "@/types";
 
 export async function GET(
   _request: Request,
@@ -19,6 +27,43 @@ export async function GET(
     }
 
     const observation = await getObservation(projectNumber, observationId);
+    if (!observation) {
+      return apiError("Observation was not found.", 404);
+    }
+
+    return Response.json({ observation });
+  });
+}
+
+/** Saves edits to an existing observation. Validated exactly like a new one. */
+export async function PUT(
+  request: Request,
+  {
+    params,
+  }: { params: Promise<{ projectNumber: string; observationId: string }> },
+) {
+  return handleRoute("save the observation", async () => {
+    const { projectNumber, observationId } = await params;
+
+    if (!isValidProjectNumber(projectNumber)) {
+      return apiError("Invalid project number.", 400);
+    }
+    if (!isValidGeneratedId(observationId)) {
+      return apiError("Invalid observation id.", 400);
+    }
+
+    const body: unknown = await request.json().catch(() => null);
+    const problem = validateSaveObservation(body, projectNumber);
+    if (problem) {
+      return apiError(problem, 400);
+    }
+
+    const input = body as SaveObservationInput;
+    if (input.id !== observationId) {
+      return apiError("Observation id does not match the URL.", 400);
+    }
+
+    const observation = await updateObservation(projectNumber, input);
     if (!observation) {
       return apiError("Observation was not found.", 404);
     }

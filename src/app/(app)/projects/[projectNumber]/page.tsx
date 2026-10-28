@@ -4,11 +4,12 @@ import { Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LuClipboardList, LuPlus } from "react-icons/lu";
+import { LuClipboardList, LuPlus, LuPrinter } from "react-icons/lu";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ObservationList } from "@/components/ObservationList";
 import { PageShell } from "@/components/PageShell";
+import { ProjectReport } from "@/components/ProjectReport";
 import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { notifyError } from "@/components/ui/toaster";
 import { wizardPath } from "@/lib/workflowSteps";
@@ -78,20 +79,41 @@ export default function ProjectPage() {
       description={project ? `Project ${project.projectNumber}` : undefined}
       width="5xl"
       actions={
-        <Button
-          asChild
-          colorPalette="brand"
-          size={{ base: "lg", md: "md" }}
-          width={{ base: "full", md: "auto" }}
-        >
-          <Link href={newObservationHref}>
-            <LuPlus />
-            New observation
-          </Link>
-        </Button>
+        <Stack direction={{ base: "column", md: "row" }} gap="3">
+          <Button
+            variant="outline"
+            size={{ base: "lg", md: "md" }}
+            width={{ base: "full", md: "auto" }}
+            disabled={!observations || observations.length === 0}
+            onClick={() => window.print()}
+          >
+            <LuPrinter />
+            Print report
+          </Button>
+          <Button
+            asChild
+            colorPalette="brand"
+            size={{ base: "lg", md: "md" }}
+            width={{ base: "full", md: "auto" }}
+          >
+            <Link href={newObservationHref}>
+              <LuPlus />
+              New observation
+            </Link>
+          </Button>
+        </Stack>
       }
     >
-      <Stack gap="3">
+      {observations && observations.length > 0 && (
+        <ProjectReport
+          projectNumber={projectNumber}
+          projectName={project?.name}
+          observations={observations}
+        />
+      )}
+
+      {/* The on-screen list; the printed report replaces it on paper. */}
+      <Stack gap="3" data-print="hide">
         <Text fontSize="sm" fontWeight="semibold" color="fg.muted" textTransform="uppercase" letterSpacing="wide">
           Field observations
         </Text>

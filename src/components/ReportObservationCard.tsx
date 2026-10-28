@@ -39,6 +39,7 @@ export function ReportObservationCard({
     >
       <Stack gap="3">
         <Stack
+          data-print-layout="pair"
           direction={{ base: "column", sm: "row" }}
           gap={{ base: 1, sm: 8 }}
         >
