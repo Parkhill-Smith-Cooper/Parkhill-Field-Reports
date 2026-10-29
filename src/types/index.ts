@@ -15,6 +15,12 @@ export type Project = {
   updatedAt: string;
 };
 
+/** A project as VantagePoint knows it; `projectNumber` is its WBS1. */
+export type VantagePointProject = {
+  projectNumber: string;
+  name: string;
+};
+
 export type NewProjectInput = {
   projectNumber: string;
   name: string;

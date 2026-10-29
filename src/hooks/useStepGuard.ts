@@ -28,10 +28,14 @@ import { wizardPath, type WorkflowStepSlug } from "@/lib/workflowSteps";
  * engineer-authored ones can), and Step 4 edits wording rather than selection.
  * Re-checking Step 1's fields here would break that - clearing the observation
  * text while editing the report would throw the engineer back to Step 1.
+ *
+ * `paused` is for a step that empties the draft on purpose - Step 4 after a
+ * successful save - so the guard does not race its navigation back to Step 1.
  */
 export function useStepGuard(
   projectNumber: string,
   current: WorkflowStepSlug,
+  { paused = false }: { paused?: boolean } = {},
 ): { ready: boolean } {
   const router = useRouter();
   const { draft, hydrated } = useObservationDraft();
@@ -40,10 +44,10 @@ export function useStepGuard(
   const redirectTo = hydrated ? requiredStep(draft, current) : undefined;
 
   useEffect(() => {
-    if (redirectTo) {
+    if (redirectTo && !paused) {
       router.replace(wizardPath(projectNumber, redirectTo));
     }
-  }, [redirectTo, projectNumber, router]);
+  }, [redirectTo, paused, projectNumber, router]);
 
   return { ready: redirectTo === null };
 }

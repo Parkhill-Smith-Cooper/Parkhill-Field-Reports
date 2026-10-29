@@ -47,6 +47,16 @@ export const env = {
   get storageContainer() {
     return optional("AZURE_STORAGE_CONTAINER", "field-photos");
   },
+  get fabricSqlServer() {
+    return required("FABRIC_SQL_SERVER");
+  },
+  get fabricSqlDatabase() {
+    return required("FABRIC_SQL_DATABASE");
+  },
+  /** `[schema.]table` of the VantagePoint project sync. */
+  get fabricProjectsTable() {
+    return optional("FABRIC_PROJECTS_TABLE", "DT_BRZ.project");
+  },
   /** The one secret in the app. Server-only; never a `NEXT_PUBLIC_*` name. */
   get openaiApiKey() {
     return required("OPENAI_API_KEY");

@@ -30,10 +30,13 @@ export default function ReportStepPage() {
 
   const { draft, setField, editCause, editAction, reset } =
     useObservationDraft();
-  const { ready } = useStepGuard(projectNumber, "report");
-
   const [projectName, setProjectName] = useState<string | undefined>();
   const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  // Once saved, the draft is cleared deliberately; the guard must not read
+  // that as "Step 1 is incomplete" and bounce back to a new observation.
+  const { ready } = useStepGuard(projectNumber, "report", { paused: saved });
 
   // The project name is on the report but not in the draft, so it is fetched
   // here rather than carried through three steps of state that never used it.
@@ -58,7 +61,7 @@ export default function ReportStepPage() {
   async function save() {
     setSaving(true);
     try {
-      const observation = await saveObservation(projectNumber, {
+      await saveObservation(projectNumber, {
         id: draft.observationId,
         ...draft.form,
         photos: draft.photos,
@@ -73,11 +76,11 @@ export default function ReportStepPage() {
       });
 
       // Clear the draft only after the write has succeeded, so a failed save
-      // never costs the engineer their work.
+      // never costs the engineer their work. Back to the project's list of
+      // observations, where the new one now appears.
+      setSaved(true);
       reset();
-      router.replace(
-        `/projects/${encodeURIComponent(projectNumber)}/observations/${observation.id}`,
-      );
+      router.replace(`/projects/${encodeURIComponent(projectNumber)}`);
     } catch (error) {
       notifyError("Could not save the field observation", error);
       setSaving(false);

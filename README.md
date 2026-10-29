@@ -1,4 +1,4 @@
-# ParkhillCXField
+# Parkhill Field Reports
 
 A web-based commissioning field application for Parkhill engineers.
 
@@ -357,8 +357,9 @@ The included workflow —
 `main`. It needs:
 
 - Repository **variable** `AZURE_WEBAPP_NAME`
-- Repository **secret** `AZURE_WEBAPP_PUBLISH_PROFILE` (App Service → Overview
-  → Download publish profile)
+- Repository **secrets** `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and
+  `AZURE_SUBSCRIPTION_ID` for the OIDC deploy identity that App Service →
+  Deployment Center creates. No publish profile is needed.
 
 And on the App Service itself, one time:
 
@@ -378,7 +379,7 @@ does not need `node_modules` at runtime. The workflow copies `public/` and
 design, and omitting that step produces an app that starts but renders
 unstyled.
 
-The publish profile is only used to upload the build. At runtime the app holds
+The OIDC login is only used to upload the build. At runtime the app holds
 no Azure credentials of its own; it uses its managed identity.
 
 ---
