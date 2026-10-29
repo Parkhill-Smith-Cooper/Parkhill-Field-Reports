@@ -76,10 +76,12 @@ export default async function SignInPage({
           <Image
             src={LOGO_SRC}
             alt="Parkhill"
-            width={232}
-            height={40}
+            width={250}
+            height={85}
             priority
-            style={{ height: "2rem", width: "auto" }}
+            // alignSelf: a Stack child stretches to the column width by
+            // default, which squashes the logo out of proportion.
+            style={{ height: "3rem", width: "auto", alignSelf: "flex-start" }}
           />
           <Stack gap="2">
             <Text fontSize="2xl" fontWeight="semibold" letterSpacing="-0.01em">

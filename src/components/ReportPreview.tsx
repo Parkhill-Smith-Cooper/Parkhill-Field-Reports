@@ -81,8 +81,8 @@ export function ReportPreview({
             <NextImage
               src={LOGO_SRC}
               alt="Parkhill"
-              width={232}
-              height={40}
+              width={250}
+              height={85}
               style={{ height: "2rem", width: "auto" }}
             />
             <Text
