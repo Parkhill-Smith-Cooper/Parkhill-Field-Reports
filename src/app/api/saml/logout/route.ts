@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { samlProvider } from "@/lib/auth/samlClient";
+import { publicOrigin } from "@/lib/publicOrigin";
 import {
   SESSION_COOKIE,
   cookieOptions,
@@ -18,7 +19,7 @@ import {
  * silently and look like the sign-out never happened.
  */
 export async function GET(request: Request) {
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const store = await cookies();
   const session = await readSessionToken(store.get(SESSION_COOKIE)?.value);
 

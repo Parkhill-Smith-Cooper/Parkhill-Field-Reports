@@ -81,7 +81,7 @@ export default async function SignInPage({
             priority
             // alignSelf: a Stack child stretches to the column width by
             // default, which squashes the logo out of proportion.
-            style={{ height: "3rem", width: "auto", alignSelf: "flex-start" }}
+            style={{ height: "3rem", width: "auto", alignSelf: "center" }}
           />
           <Stack gap="2">
             <Text fontSize="2xl" fontWeight="semibold" letterSpacing="-0.01em">

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { NotAuthorizedError, authorizeProfile } from "@/lib/auth/authorize";
 import { unpackRelayState } from "@/lib/auth/relayState";
 import { samlProvider } from "@/lib/auth/samlClient";
+import { publicOrigin } from "@/lib/publicOrigin";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
@@ -29,7 +30,7 @@ import {
  * `application/x-www-form-urlencoded`, not JSON.
  */
 export async function POST(request: Request) {
-  const origin = new URL(request.url).origin;
+  const origin = publicOrigin(request);
   const fail = (reason: string) =>
     NextResponse.redirect(new URL(`/?error=${reason}`, origin), {
       status: 303,

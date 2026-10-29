@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth/session";
+import { publicOrigin } from "@/lib/publicOrigin";
 
 /**
  * The single gate in front of the application.
@@ -52,7 +53,7 @@ export async function proxy(request: NextRequest) {
 
   // Send the engineer to sign in, remembering where they were headed so they
   // land back on it rather than on a generic home page.
-  const signIn = new URL("/", request.url);
+  const signIn = new URL("/", publicOrigin(request));
   signIn.searchParams.set("returnTo", `${pathname}${search}`);
   return NextResponse.redirect(signIn);
 }

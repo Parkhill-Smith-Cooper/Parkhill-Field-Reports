@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { packRelayState, safeReturnTo } from "@/lib/auth/relayState";
 import { samlProvider } from "@/lib/auth/samlClient";
+import { publicOrigin } from "@/lib/publicOrigin";
 
 /**
  * Starts sign-in: builds a SAML AuthnRequest and redirects to Entra ID.
@@ -37,6 +38,6 @@ export async function GET(request: Request) {
       error.message.startsWith("Missing required environment variable")
         ? "not_configured"
         : "login_failed";
-    return NextResponse.redirect(new URL(`/?error=${message}`, url.origin));
+    return NextResponse.redirect(new URL(`/?error=${message}`, publicOrigin(request)));
   }
 }
