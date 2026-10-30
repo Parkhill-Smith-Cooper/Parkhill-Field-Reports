@@ -95,11 +95,12 @@ export function ProjectReport({
             </Table.Header>
             <Table.Body>
               {rows.map((observation, index) => (
-                <Table.Row
-                  key={observation.id}
-                  data-print="avoid-break"
-                  verticalAlign="top"
-                >
+                // Rows may split across pages: an observation with long causes
+                // and actions is taller than what is left of the first page, and
+                // `break-inside: avoid` here pushed the whole table (header
+                // included) to page two, leaving page one blank. The list items
+                // inside still avoid breaks, so a split falls between them.
+                <Table.Row key={observation.id} verticalAlign="top">
                   <Table.Cell>{index + 1}</Table.Cell>
                   <Table.Cell whiteSpace="nowrap">
                     {formatReportDate(observation.observedDate)}
@@ -147,7 +148,7 @@ function ItemList({ items }: { items: RecordedItem[] }) {
   return (
     <Stack as="ol" gap="1" pl="4" listStyleType="decimal">
       {items.map((item) => (
-        <Box as="li" key={item.id}>
+        <Box as="li" key={item.id} data-print="avoid-break">
           {item.text}
         </Box>
       ))}
