@@ -35,7 +35,8 @@ export async function GET(request: Request) {
     console.error("[ParkhillCXField] SAML login could not be started", error);
     const message =
       error instanceof Error &&
-      error.message.startsWith("Missing required environment variable")
+      (error.message.startsWith("Missing required environment variable") ||
+        error.message.startsWith("Missing or too-short SESSION_SECRET"))
         ? "not_configured"
         : "login_failed";
     return NextResponse.redirect(new URL(`/?error=${message}`, publicOrigin(request)));
