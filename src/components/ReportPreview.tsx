@@ -12,6 +12,7 @@ import NextImage from "next/image";
 
 import { LOGO_SRC } from "@/lib/branding";
 import { EditableText } from "@/components/EditableText";
+import { ReportClosing } from "@/components/ReportClosing";
 import { ReportObservationCard } from "@/components/ReportObservationCard";
 import { usePhotoUrls } from "@/hooks/usePhotoUrls";
 import { formatReportDate } from "@/lib/formatDate";
@@ -160,8 +161,8 @@ export function ReportPreview({
           </ReportSection>
         )}
 
-        <ReportSection title="Potential Failure Causes">
-          <ReportItemList items={causes} onChange={onCauseChange} noun="cause" />
+        <ReportSection title="Recommended Diagnostic Checks">
+          <ReportItemList items={causes} onChange={onCauseChange} noun="diagnostic check" />
         </ReportSection>
 
         <ReportSection title="Suggested Corrective Actions">
@@ -171,6 +172,8 @@ export function ReportPreview({
             noun="corrective action"
           />
         </ReportSection>
+
+        <ReportClosing />
       </Stack>
     </Box>
   );

@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       !suggestionRequest.selectedCauses ||
       suggestionRequest.selectedCauses.length === 0
     ) {
-      return apiError("Select at least one potential failure cause first.", 400);
+      return apiError("Select at least one recommended diagnostic check first.", 400);
     }
 
     const actions: SelectableItem[] = (

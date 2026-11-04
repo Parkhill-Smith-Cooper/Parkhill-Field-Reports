@@ -3,6 +3,7 @@
 import { Box, Stack, Table, Text } from "@chakra-ui/react";
 import NextImage from "next/image";
 
+import { ReportClosing } from "@/components/ReportClosing";
 import { LOGO_SRC } from "@/lib/branding";
 import { formatReportDate } from "@/lib/formatDate";
 import type { RecordedItem, SavedObservation } from "@/types";
@@ -121,6 +122,8 @@ export function ProjectReport({
               ))}
             </Table.Body>
           </Table.Root>
+
+          <ReportClosing />
         </Stack>
       </Box>
     </Box>
@@ -135,7 +138,7 @@ const COLUMNS = [
   "Location",
   "Activity / Test",
   "Observation",
-  "Potential causes",
+  "Recommended diagnostic checks",
   "Corrective actions",
   "Photos",
 ];

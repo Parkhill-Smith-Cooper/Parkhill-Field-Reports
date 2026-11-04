@@ -1,6 +1,11 @@
 import "server-only";
 
-import { cosmosStatus, projectsContainer } from "@/lib/azure/cosmos";
+import { deletePhotosForProject } from "@/lib/azure/blob";
+import {
+  cosmosStatus,
+  observationsContainer,
+  projectsContainer,
+} from "@/lib/azure/cosmos";
 import { currentUser } from "@/lib/currentUser";
 import type { NewProjectInput, Project } from "@/types";
 
@@ -64,4 +69,68 @@ export async function createProject(input: NewProjectInput): Promise<Project> {
     }
     throw error;
   }
+}
+
+/**
+ * Renames a project. The project number is the document id and the partition
+ * key, so it cannot change; it comes from VantagePoint anyway. Returns `null`
+ * when there is no such project, so an edit can never quietly create one.
+ */
+export async function updateProject(
+  projectNumber: string,
+  name: string,
+): Promise<Project | null> {
+  const existing = await getProject(projectNumber);
+  if (!existing) return null;
+
+  const updated: Project = {
+    ...existing,
+    name,
+    updatedAt: new Date().toISOString(),
+  };
+  const { resource } = await projectsContainer()
+    .item(projectNumber, projectNumber)
+    .replace(updated);
+  return resource ?? updated;
+}
+
+/**
+ * Deletes a project and everything recorded against it: its photos, then its
+ * observations, then the project itself. The project goes last so that a
+ * failure part-way leaves it visible and the delete can simply be retried.
+ * Returns `null` when there is no such project.
+ */
+export async function deleteProject(
+  projectNumber: string,
+): Promise<{ observations: number; photos: number } | null> {
+  const existing = await getProject(projectNumber);
+  if (!existing) return null;
+
+  const photos = await deletePhotosForProject(projectNumber);
+
+  const { resources: ids } = await observationsContainer()
+    .items.query<{ id: string }>(
+      {
+        query: "SELECT c.id FROM c WHERE c.projectNumber = @projectNumber",
+        parameters: [{ name: "@projectNumber", value: projectNumber }],
+      },
+      { partitionKey: projectNumber },
+    )
+    .fetchAll();
+
+  for (const { id } of ids) {
+    try {
+      await observationsContainer().item(id, projectNumber).delete();
+    } catch (error) {
+      if (cosmosStatus(error) !== 404) throw error;
+    }
+  }
+
+  try {
+    await projectsContainer().item(projectNumber, projectNumber).delete();
+  } catch (error) {
+    if (cosmosStatus(error) !== 404) throw error;
+  }
+
+  return { observations: ids.length, photos };
 }

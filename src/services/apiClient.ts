@@ -21,7 +21,7 @@ export class ApiRequestError extends Error {
   }
 }
 
-async function toError(response: Response): Promise<ApiRequestError> {
+export async function toError(response: Response): Promise<ApiRequestError> {
   let message = `Request failed (${response.status}).`;
   try {
     const body = (await response.json()) as Partial<ApiError>;
@@ -59,6 +59,25 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
     method: "PUT",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await toError(response);
+  return (await response.json()) as T;
+}
+
+export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await toError(response);
+  return (await response.json()) as T;
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await fetch(path, {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
   });
   if (!response.ok) throw await toError(response);
   return (await response.json()) as T;

@@ -23,6 +23,7 @@ import {
 import { EmptyState } from "@/components/EmptyState";
 import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { PageShell } from "@/components/PageShell";
+import { ProjectActions } from "@/components/ProjectActions";
 import { notifyError } from "@/components/ui/toaster";
 import { fetchProjects } from "@/services/projectService";
 import type { Project } from "@/types";
@@ -144,6 +145,20 @@ export default function ProjectsPage() {
                   key={project.id}
                   project={project}
                   isFirst={index === 0}
+                  onUpdated={(updated) =>
+                    setProjects((current) =>
+                      (current ?? []).map((p) =>
+                        p.id === updated.id ? updated : p,
+                      ),
+                    )
+                  }
+                  onDeleted={(projectNumber) =>
+                    setProjects((current) =>
+                      (current ?? []).filter(
+                        (p) => p.projectNumber !== projectNumber,
+                      ),
+                    )
+                  }
                 />
               ))}
             </Stack>
@@ -157,19 +172,41 @@ export default function ProjectsPage() {
 function ProjectRow({
   project,
   isFirst,
+  onUpdated,
+  onDeleted,
 }: {
   project: Project;
   isFirst: boolean;
+  onUpdated: (project: Project) => void;
+  onDeleted: (projectNumber: string) => void;
 }) {
+  return (
+    <HStack
+      gap="0"
+      borderTopWidth={isFirst ? "0" : "1px"}
+      borderColor="line"
+      pr={{ base: 2, md: 3 }}
+      transition="background 0.12s"
+      _hover={{ bg: "surface.muted" }}
+    >
+      <ProjectLink project={project} />
+      <ProjectActions
+        project={project}
+        onUpdated={onUpdated}
+        onDeleted={onDeleted}
+      />
+    </HStack>
+  );
+}
+
+function ProjectLink({ project }: { project: Project }) {
   return (
     <Box
       asChild
-      borderTopWidth={isFirst ? "0" : "1px"}
-      borderColor="line"
+      flex="1"
+      minW="0"
       px={{ base: 4, md: 5 }}
       py={{ base: 4, md: 4 }}
-      transition="background 0.12s"
-      _hover={{ bg: "surface.muted" }}
       // A whole-row link, so the tap target on a phone is the full row rather
       // than just the project name.
       _focusVisible={{ outline: "2px solid", outlineColor: "brand.focusRing", outlineOffset: "-2px" }}
