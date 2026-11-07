@@ -16,6 +16,19 @@ export function isValidProjectNumber(value: unknown): value is string {
   return typeof value === "string" && PROJECT_NUMBER_PATTERN.test(value);
 }
 
+export const PROJECT_NAME_MAX_LENGTH = 200;
+
+/** Returns a message for a 400 response, or `null` when the name is usable. */
+export function validateProjectName(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return "Project name is required.";
+  }
+  if (value.trim().length > PROJECT_NAME_MAX_LENGTH) {
+    return `Project name must be ${PROJECT_NAME_MAX_LENGTH} characters or fewer.`;
+  }
+  return null;
+}
+
 export const PROJECT_NUMBER_HINT =
   "Use letters, numbers, dots, dashes or underscores (for example 24-1057).";
 
@@ -125,13 +138,13 @@ export function validateSaveObservation(
     return "One or more photos are invalid.";
   }
   if (!isRecordedItemArray(input.causes)) {
-    return "One or more potential failure causes are invalid.";
+    return "One or more recommended diagnostic checks are invalid.";
   }
   if (!isRecordedItemArray(input.actions)) {
     return "One or more suggested corrective actions are invalid.";
   }
   if (input.causes!.length === 0) {
-    return "Select at least one potential failure cause.";
+    return "Select at least one recommended diagnostic check.";
   }
   if (input.actions!.length === 0) {
     return "Select at least one suggested corrective action.";

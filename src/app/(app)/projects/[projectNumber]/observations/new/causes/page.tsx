@@ -15,7 +15,7 @@ import { useStepGuard } from "@/hooks/useStepGuard";
 import { wizardPath } from "@/lib/workflowSteps";
 import { fetchCorrectiveActions } from "@/services/aiService";
 
-/** Step 2 - which of the suggested causes the engineer actually accepts. */
+/** Step 2 - which of the suggested checks the engineer actually accepts. */
 export default function CausesStepPage() {
   const params = useParams<{ projectNumber: string }>();
   const projectNumber = decodeURIComponent(params.projectNumber);
@@ -68,22 +68,22 @@ export default function CausesStepPage() {
     <WizardShell
       projectNumber={projectNumber}
       step="causes"
-      description="Select the causes that apply. These are suggestions - nothing reaches the report unless you select it."
+      description="Select the diagnostic checks that apply. These are suggestions - nothing reaches the report unless you select it."
     >
       <Stack gap={{ base: 5, md: 6 }}>
         <ObservationRecap form={draft.form} />
 
         <SelectableItemList
-          legend="Potential failure causes"
-          helperText="Select any number. Edit the wording of any cause, or add one of your own."
+          legend="Recommended diagnostic checks"
+          helperText="Select any number. Edit the wording of any check, or add one of your own."
           items={draft.causes}
           onToggle={toggleCause}
           onEdit={editCause}
           onRemove={removeCause}
           onAddCustom={addCustomCause}
-          addLabel="Add your own cause"
+          addLabel="Add your own diagnostic check"
           addPlaceholder="Describe the cause in your own words…"
-          noun="cause"
+          noun="diagnostic check"
         />
 
         <NavigationButtons

@@ -33,7 +33,7 @@ export async function suggestFailureCauses(
   return suggestList(
     `${ROLE}
 
-List 5 to 8 potential failure causes for what was found: the check points the engineer should investigate to find the root cause, most likely first. ${STYLE}`,
+List 5 to 8 recommended diagnostic checks for what was found: the check points the engineer should investigate to find the root cause, most likely first. ${STYLE}`,
     observationText(request),
     request.photoPaths,
   );
@@ -49,10 +49,10 @@ export async function suggestCorrectiveActions(
   return suggestList(
     `${ROLE}
 
-The engineer has already decided which potential failure causes apply. List 5 to 8 corrective actions that resolve those causes - and only those causes - most important first. Where the responsible party is clear (for example the controls contractor or the balancing contractor), name it. ${STYLE}`,
+The engineer has already decided which recommended diagnostic checks apply. List 5 to 8 corrective actions that resolve those causes - and only those causes - most important first. Where the responsible party is clear (for example the controls contractor or the balancing contractor), name it. ${STYLE}`,
     `${observationText(request)}
 
-Potential failure causes selected by the engineer:
+Recommended diagnostic checks selected by the engineer:
 ${causes}`,
     request.photoPaths,
   );

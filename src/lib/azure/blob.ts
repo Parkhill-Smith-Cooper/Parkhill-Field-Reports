@@ -87,6 +87,24 @@ export async function downloadPhoto(blobPath: string): Promise<Buffer> {
 }
 
 /**
+ * Deletes every photo stored under one project folder. Used when a project is
+ * deleted. The trailing slash matters: without it, project "24-10" would also
+ * match "24-105/...".
+ */
+export async function deletePhotosForProject(
+  projectNumber: string,
+): Promise<number> {
+  let deleted = 0;
+  for await (const blob of container().listBlobsFlat({
+    prefix: `${projectNumber}/`,
+  })) {
+    await container().deleteBlob(blob.name);
+    deleted += 1;
+  }
+  return deleted;
+}
+
+/**
  * Fetching a delegation key is a network round trip, and one key can sign any
  * number of SAS tokens for hours. Caching it turns "render a report with eight
  * photos" from nine Azure calls into one.

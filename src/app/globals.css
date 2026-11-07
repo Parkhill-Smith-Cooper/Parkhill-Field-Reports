@@ -33,14 +33,28 @@
 }
 
 @media print {
+  /* Page numbers live in the page margin. Chrome and Edge render margin
+   * boxes; browsers that do not (Firefox) print without a number. */
   @page {
     margin: 0.6in;
+
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font: 9pt Arial, Helvetica, sans-serif;
+      color: #555;
+    }
   }
 
   /* A named page, so only content that asks for it is printed landscape. */
   @page landscape {
     size: landscape;
     margin: 0.5in;
+
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font: 9pt Arial, Helvetica, sans-serif;
+      color: #555;
+    }
   }
 
   [data-print="only"] {

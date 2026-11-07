@@ -1,10 +1,26 @@
 "use client";
 
-import { Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
+import {
+  Button,
+  HStack,
+  Menu,
+  Portal,
+  Spinner,
+  Stack,
+  Text,
+} from "@chakra-ui/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LuClipboardList, LuPlus, LuPrinter } from "react-icons/lu";
+import {
+  LuChevronDown,
+  LuClipboardList,
+  LuDownload,
+  LuFileSpreadsheet,
+  LuFileText,
+  LuPlus,
+  LuPrinter,
+} from "react-icons/lu";
 
 import { EmptyState } from "@/components/EmptyState";
 import { ObservationList } from "@/components/ObservationList";
@@ -14,7 +30,11 @@ import { ProjectBreadcrumb } from "@/components/ProjectBreadcrumb";
 import { notifyError } from "@/components/ui/toaster";
 import { wizardPath } from "@/lib/workflowSteps";
 import { fetchObservations } from "@/services/observationService";
-import { fetchProject } from "@/services/projectService";
+import { downloadDeficiencyLogPdf } from "@/lib/deficiencyLogPdf";
+import {
+  downloadDeficiencyLogExcel,
+  fetchProject,
+} from "@/services/projectService";
 import type { Project, SavedObservation } from "@/types";
 
 /** Project detail: what this project is, and everything recorded against it. */
@@ -27,6 +47,27 @@ export default function ProjectPage() {
     null,
   );
   const [notFound, setNotFound] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  async function exportLog(format: "xlsx" | "pdf") {
+    if (!observations || observations.length === 0) return;
+    setExporting(true);
+    try {
+      if (format === "xlsx") {
+        await downloadDeficiencyLogExcel(projectNumber);
+      } else {
+        await downloadDeficiencyLogPdf(
+          projectNumber,
+          project?.name,
+          observations,
+        );
+      }
+    } catch (error) {
+      notifyError("Could not export the deficiency log", error);
+    } finally {
+      setExporting(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -90,6 +131,43 @@ export default function ProjectPage() {
             <LuPrinter />
             Print report
           </Button>
+          <Menu.Root positioning={{ placement: "bottom-end" }}>
+            <Menu.Trigger asChild>
+              <Button
+                variant="outline"
+                size={{ base: "lg", md: "md" }}
+                width={{ base: "full", md: "auto" }}
+                loading={exporting}
+                disabled={!observations || observations.length === 0}
+              >
+                <LuDownload />
+                Export deficiency log
+                <LuChevronDown />
+              </Button>
+            </Menu.Trigger>
+            <Portal>
+              <Menu.Positioner>
+                <Menu.Content>
+                  <Menu.Item
+                    value="xlsx"
+                    cursor="pointer"
+                    onClick={() => void exportLog("xlsx")}
+                  >
+                    <LuFileSpreadsheet />
+                    Excel (editable .xlsx)
+                  </Menu.Item>
+                  <Menu.Item
+                    value="pdf"
+                    cursor="pointer"
+                    onClick={() => void exportLog("pdf")}
+                  >
+                    <LuFileText />
+                    PDF
+                  </Menu.Item>
+                </Menu.Content>
+              </Menu.Positioner>
+            </Portal>
+          </Menu.Root>
           <Button
             asChild
             colorPalette="brand"
@@ -127,7 +205,7 @@ export default function ProjectPage() {
           <EmptyState
             icon={<LuClipboardList />}
             title="No observations recorded"
-            description="Start a new field observation to work through potential causes, corrective actions and a report."
+            description="Start a new field observation to work through recommended diagnostic checks, corrective actions and a report."
             action={
               <Button asChild colorPalette="brand" size="sm">
                 <Link href={newObservationHref}>
