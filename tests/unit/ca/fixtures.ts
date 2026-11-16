@@ -45,6 +45,7 @@ export function reportInput(id = "carep_1"): Omit<CaReport, "reportNumber"> {
     ),
     latestRevision: null,
     hasUnissuedChanges: false,
+    draftUpdatedAt: "2026-07-14T14:30:00.000Z",
     createdAt: "2026-07-14T14:30:00.000Z",
     createdBy: "engineer@parkhill.com",
     updatedAt: "2026-07-14T14:30:00.000Z",

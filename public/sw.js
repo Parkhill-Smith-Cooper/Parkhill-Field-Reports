@@ -21,7 +21,7 @@
  *   sign-in redirect is never stored as if it were the page.
  */
 
-const CACHE = "ca-shell-v1";
+const CACHE = "ca-shell-v2";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -57,6 +57,10 @@ async function networkFirst(request) {
     const hit = await cache.match(request, { ignoreVary: true, ignoreSearch: isStatic });
     if (hit) return hit;
     if (request.mode === "navigate") {
+      // Same page, different query (e.g. a report started offline opens at
+      // /reports?report=<new id>): the page reads its query in the browser.
+      const samePage = await cache.match(request, { ignoreVary: true, ignoreSearch: true });
+      if (samePage) return samePage;
       // An unvisited CA page: fall back to the project list if we have it.
       const home = await cache.match("/field-reports", { ignoreVary: true });
       if (home) return home;
@@ -75,11 +79,39 @@ async function cacheFirst(request) {
 }
 
 /*
- * The page that registered this worker loaded BEFORE the worker controlled
- * it, so its HTML and scripts never passed through `fetch` below. The app
- * sends their URLs here once the worker is active, so the very first page
- * opened is available offline too - not only pages opened afterwards.
+ * Pages and assets the app asks to keep for offline use:
+ * - the page that registered this worker (it loaded BEFORE the worker
+ *   controlled it, so its HTML and scripts never passed through `fetch`);
+ * - a project's other tabs, warmed when the project is opened online, so
+ *   switching tabs works offline even if a tab was never visited.
+ * For each page, the scripts and styles it references are cached too.
  */
+// Chunk paths contain route groups like "(app)", so ")" must be allowed.
+const STATIC_ASSET = /\/_next\/static\/[^"'\s\\<>]+/g;
+
+async function keep(cache, href) {
+  const response = await fetch(href, { credentials: "same-origin" });
+  if (!cacheable(response)) return;
+  const isHtml = (response.headers.get("content-type") || "").includes("text/html");
+  if (!isHtml) {
+    await cache.put(href, response);
+    return;
+  }
+  const html = await response.clone().text();
+  await cache.put(href, response);
+  const assets = new Set(html.match(STATIC_ASSET) || []);
+  await Promise.all(
+    [...assets].map(async (asset) => {
+      try {
+        if (await cache.match(asset, { ignoreSearch: true })) return;
+        const r = await fetch(asset);
+        if (cacheable(r)) await cache.put(asset, r);
+      } catch {
+        // Best effort.
+      }
+    }),
+  );
+}
 self.addEventListener("message", (event) => {
   const data = event.data;
   if (!data || data.type !== "ca-cache-urls" || !Array.isArray(data.urls)) return;
@@ -91,8 +123,7 @@ self.addEventListener("message", (event) => {
           try {
             const url = new URL(raw, self.location.origin);
             if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
-            const response = await fetch(url.href, { credentials: "same-origin" });
-            if (cacheable(response)) await cache.put(url.href, response);
+            await keep(cache, url.href);
           } catch {
             // Best effort; the next online visit fills any gap.
           }

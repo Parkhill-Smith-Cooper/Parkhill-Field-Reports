@@ -79,12 +79,22 @@ export interface CaReportStore {
   create(
     report: Omit<CaReport, "reportNumber">,
   ): Promise<CaReport>;
-  /** Replaces the draft. Marks `hasUnissuedChanges` once a revision exists. */
+  /**
+   * Replaces the draft. Marks `hasUnissuedChanges` once a revision exists.
+   * Ignored (returns the stored report) when `clientUpdatedAt` is not newer
+   * than the stored `draftUpdatedAt`: a late, older edit never wins.
+   */
   saveDraft(
     projectNumber: string,
     reportId: string,
     content: CaReportContent,
+    clientUpdatedAt?: string,
   ): Promise<CaReport | null>;
+  /**
+   * Deletes a report that has never been issued. Issued reports (and their
+   * revisions) are never deleted.
+   */
+  deleteDraft(projectNumber: string, reportId: string): Promise<"deleted" | "issued" | "missing">;
   /**
    * Create-only. Throws `RevisionAlreadyExistsError` when `revision.id`
    * already exists. Never updates or deletes an existing revision.

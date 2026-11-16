@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 
 import { putCaPhoto } from "@/services/ca/photoService";
 import { putCaPin } from "@/services/ca/pinService";
+import { putCaReport } from "@/services/ca/reportService";
 
 import { onCaLocalChange } from "./events";
 import { pruneSyncedPhotos } from "./photoStore";
@@ -21,6 +22,7 @@ export const caSync = createSyncEngine({
   transport: {
     putPhoto: (projectNumber, photoId, meta, file) => putCaPhoto(projectNumber, photoId, meta, file),
     putPin: (projectNumber, pinId, body) => putCaPin(projectNumber, pinId, body),
+    putReport: (projectNumber, reportId, body) => putCaReport(projectNumber, reportId, body),
   },
 });
 

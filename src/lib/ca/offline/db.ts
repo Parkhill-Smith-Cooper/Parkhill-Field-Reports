@@ -2,7 +2,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 
-import type { CaDrawing, CaPin, CaProject } from "@/types/ca";
+import type { CaDrawing, CaPin, CaProject, CaReportContent } from "@/types/ca";
 
 /**
  * The on-device store for CA Field Reports (IndexedDB).
@@ -17,7 +17,7 @@ import type { CaDrawing, CaPin, CaProject } from "@/types/ca";
  * - `photos`    captured photos, including the downscaled JPEG bytes.
  * - `pins`      floor-plan pins, queued for sync like photos.
  * - `drawings`  drawing records and sheet images, cached for offline viewing.
- * - `drafts`    report drafts (Phase 4).
+ * - `drafts`    report drafts, queued for sync like photos and pins.
  * - `outbox`    one entry per record waiting to sync. Keyed by
  *               `{kind}:{entityId}`, so re-queuing the same record replaces
  *               its entry instead of adding a second one - a record can be
@@ -64,6 +64,18 @@ export type CachedDrawing = {
   cachedAt: string;
 };
 
+/** A report's working draft as edited on this device. */
+export type LocalDraft = {
+  /** The report id (generated on the device when the report was started). */
+  id: string;
+  projectNumber: string;
+  content: CaReportContent;
+  createdAt: string;
+  clientUpdatedAt: string;
+  syncState: SyncState;
+  lastError?: string;
+};
+
 export type OutboxKind = "photo" | "pin" | "draft";
 
 export type OutboxEntry = {
@@ -84,7 +96,7 @@ interface CaDbSchema extends DBSchema {
   photos: { key: string; value: LocalPhoto; indexes: { byProject: string } };
   pins: { key: string; value: LocalPin; indexes: { byProject: string } };
   drawings: { key: string; value: CachedDrawing; indexes: { byProject: string } };
-  drafts: { key: string; value: { id: string; projectNumber: string } & Record<string, unknown>; indexes: { byProject: string } };
+  drafts: { key: string; value: LocalDraft; indexes: { byProject: string } };
   outbox: { key: string; value: OutboxEntry };
 }
 

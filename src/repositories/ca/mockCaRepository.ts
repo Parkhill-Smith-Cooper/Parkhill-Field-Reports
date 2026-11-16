@@ -241,18 +241,31 @@ export function createMockCaRepository(options: {
         persist();
         return clone(report);
       },
-      async saveDraft(projectNumber, reportId, content) {
+      async saveDraft(projectNumber, reportId, content, clientUpdatedAt) {
         const existing = db.reports[projectNumber]?.[reportId];
         if (!existing) return null;
+        const editedAt = clientUpdatedAt ?? now();
+        if (existing.draftUpdatedAt && !newer(editedAt, existing.draftUpdatedAt)) {
+          return clone(existing); // a late, older edit: keep the newer draft
+        }
         const updated: CaReport = {
           ...existing,
           draft: clone(content),
+          draftUpdatedAt: editedAt,
           hasUnissuedChanges: existing.latestRevision !== null,
           updatedAt: now(),
         };
         db.reports[projectNumber][reportId] = updated;
         persist();
         return clone(updated);
+      },
+      async deleteDraft(projectNumber, reportId) {
+        const existing = db.reports[projectNumber]?.[reportId];
+        if (!existing) return "missing";
+        if (existing.latestRevision !== null) return "issued";
+        delete db.reports[projectNumber][reportId];
+        persist();
+        return "deleted";
       },
       async createRevision(revision) {
         const table = bucket(db.revisions, revision.projectNumber);

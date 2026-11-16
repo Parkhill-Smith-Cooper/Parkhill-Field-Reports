@@ -79,3 +79,20 @@ export async function serverPhotosWithPins(request: APIRequestContext, projectNu
   const response = await request.get(`/api/ca/projects/${encodeURIComponent(projectNumber)}/photos`);
   return ((await response.json()) as { photos: { id: string; pinId?: string }[] }).photos;
 }
+
+/** Waits until a page (by path) is in the CA offline cache. */
+export async function waitForCached(page: Page, path: string) {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(async (p) => {
+          const url = new URL(p, location.origin).href;
+          for (const name of await caches.keys()) {
+            if (await (await caches.open(name)).match(url, { ignoreVary: true })) return true;
+          }
+          return false;
+        }, path),
+      { timeout: 45_000, intervals: [500] },
+    )
+    .toBe(true);
+}

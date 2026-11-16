@@ -10,6 +10,8 @@ import { CaProjectTabs } from "@/components/ca/CaProjectTabs";
 import { CaSourceTag } from "@/components/ca/CaSourceTag";
 import { CaSyncStatus } from "@/components/ca/CaSyncStatus";
 import { cacheProjects, getCachedProject, isNetworkFailure } from "@/lib/ca/offline/projectCache";
+import { keepForOffline } from "@/lib/ca/offline/shell";
+import { CA_PROJECT_TABS, caProjectPath } from "@/lib/ca/routes";
 import { PageShell } from "@/components/PageShell";
 import { notifyError } from "@/components/ui/toaster";
 import { CaProjectContext } from "@/context/CaProjectContext";
@@ -42,6 +44,8 @@ export default function CaProjectLayout({ children }: { children: React.ReactNod
     fetchCaProject(projectNumber)
       .then((result) => {
         void cacheProjects([result]);
+        // Keep all three tabs loadable offline, even ones not opened yet.
+        keepForOffline(CA_PROJECT_TABS.map((t) => caProjectPath(projectNumber, t.key)));
         if (active) setLoaded({ key: projectNumber, project: result });
       })
       .catch(async (error: unknown) => {

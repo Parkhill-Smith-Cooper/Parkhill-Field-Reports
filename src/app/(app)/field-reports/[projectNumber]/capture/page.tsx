@@ -2,7 +2,8 @@
 
 import { Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
 import { useState } from "react";
-import { LuImages, LuMap, LuMapPin, LuPlus, LuX } from "react-icons/lu";
+import { LuFileText, LuImages, LuListChecks, LuMap, LuMapPin, LuPlus, LuX } from "react-icons/lu";
+import { useRouter } from "next/navigation";
 
 import { CaAddDrawingDialog } from "@/components/ca/CaAddDrawingDialog";
 import { CaCaptureBar } from "@/components/ca/CaCaptureBar";
@@ -17,6 +18,12 @@ import { useCaProject } from "@/context/CaProjectContext";
 import { useCaDrawings } from "@/hooks/ca/useCaDrawings";
 import { useCaPhotos } from "@/hooks/ca/useCaPhotos";
 import { useCaPins } from "@/hooks/ca/useCaPins";
+import { startCaReport } from "@/hooks/ca/useCaReports";
+import { useCaUser } from "@/context/CaUserContext";
+import { newCaItemId } from "@/lib/ca/ids";
+import { emptyReportContent } from "@/lib/ca/reportContent";
+import { itemsFromPhotos } from "@/lib/ca/reportLayout";
+import { caReportPath } from "@/lib/ca/routes";
 import { numberPins, pinName } from "@/lib/ca/pins";
 import { updateCaDrawing } from "@/services/ca/drawingService";
 
@@ -34,7 +41,7 @@ const SectionLabel = ({ children }: { children: React.ReactNode }) => (
  * once the drawing has been opened online.
  */
 export default function CaCapturePage() {
-  const { projectNumber } = useCaProject();
+  const { projectNumber, project } = useCaProject();
   const { photos, loaded, serverReachable, editPhoto } = useCaPhotos(projectNumber);
   const { drawings, loaded: drawingsLoaded, refresh: refreshDrawings, added } = useCaDrawings(projectNumber);
   const { pins, dropPin, editPin, deletePin } = useCaPins(projectNumber);
@@ -44,6 +51,11 @@ export default function CaCapturePage() {
   const [dropMode, setDropMode] = useState(false);
   const [openPinId, setOpenPinId] = useState<string | null>(null);
   const [openPhotoId, setOpenPhotoId] = useState<string | null>(null);
+  // Selecting photos to start a report with (null = not selecting).
+  const [selecting, setSelecting] = useState<Set<string> | null>(null);
+  const [creating, setCreating] = useState(false);
+  const { name } = useCaUser();
+  const router = useRouter();
 
   const drawing =
     drawings.find((d) => d.id === drawingId) ?? drawings.find((d) => d.isCurrent) ?? drawings[0] ?? null;
@@ -69,6 +81,25 @@ export default function CaCapturePage() {
       setOpenPinId(pin.id);
     } catch (error) {
       notifyError("Could not drop the pin", error);
+    }
+  }
+
+  async function createReport() {
+    if (!selecting || selecting.size === 0) return;
+    setCreating(true);
+    try {
+      const content = emptyReportContent(project, name);
+      content.items = itemsFromPhotos({
+        photos: photos.filter((p) => selecting.has(p.id)),
+        pins,
+        pinNames,
+        newId: newCaItemId,
+      });
+      const id = await startCaReport(projectNumber, content);
+      router.push(caReportPath(projectNumber, id));
+    } catch (error) {
+      notifyError("Could not start the report", error);
+      setCreating(false);
     }
   }
 
@@ -175,7 +206,51 @@ export default function CaCapturePage() {
             description="Take or choose photos, or drop a pin and take them there. They are saved on this device right away and upload when there is a connection."
           />
         ) : (
-          <CaPhotoGrid photos={photos} onOpen={(p) => setOpenPhotoId(p.id)} pinNames={pinNames} />
+          <>
+            {selecting ? (
+              <HStack
+                gap="2"
+                justify="space-between"
+                wrap="wrap"
+                bg="brand.subtle"
+                borderRadius="md"
+                px="3"
+                py="2"
+                position="sticky"
+                top="2"
+                zIndex="sticky"
+                data-print="hide"
+              >
+                <Text fontWeight="medium" color="brand.fg">
+                  {selecting.size} selected
+                </Text>
+                <HStack gap="2">
+                  <Button variant="outline" size="lg" bg="bg" onClick={() => setSelecting(null)}>
+                    Cancel
+                  </Button>
+                  <Button colorPalette="brand" size="lg" disabled={selecting.size === 0} loading={creating} onClick={createReport}>
+                    <LuFileText /> Create report
+                  </Button>
+                </HStack>
+              </HStack>
+            ) : (
+              <Button variant="outline" size="lg" alignSelf="flex-start" onClick={() => setSelecting(new Set())} data-print="hide">
+                <LuListChecks /> Select photos for a report
+              </Button>
+            )}
+            <CaPhotoGrid
+              photos={photos}
+              pinNames={pinNames}
+              selected={selecting ?? undefined}
+              onOpen={(p) => {
+                if (!selecting) return setOpenPhotoId(p.id);
+                const next = new Set(selecting);
+                if (next.has(p.id)) next.delete(p.id);
+                else next.add(p.id);
+                setSelecting(next);
+              }}
+            />
+          </>
         )}
       </Stack>
 

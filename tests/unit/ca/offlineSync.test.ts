@@ -14,6 +14,7 @@ import {
 import { createPin, listLocalPins, updatePin } from "@/lib/ca/offline/pinStore";
 import { backoffMs, createSyncEngine, type SyncTransport } from "@/lib/ca/offline/syncEngine";
 import type { PinBody } from "@/services/ca/pinService";
+import type { ReportPutBody } from "@/services/ca/reportService";
 
 const PROJECT = "MOCK-45371.25.01";
 
@@ -31,12 +32,21 @@ function fakeServer() {
   const pins = new Map<string, PinBody & { puts: number }>();
   /** Order in which records arrived, e.g. ["pin:capin_…", "photo:caph_…"]. */
   const arrivals: string[] = [];
+  const reports = new Map<string, { draft: ReportPutBody["draft"]; clientUpdatedAt: string; puts: number }>();
   const transport: SyncTransport = {
     async putPin(_project, id, body) {
       const existing = pins.get(id);
       arrivals.push(`pin:${id}`);
       if (!existing || body.clientUpdatedAt > existing.clientUpdatedAt) {
         pins.set(id, { ...body, puts: (existing?.puts ?? 0) + 1 });
+      }
+      return {};
+    },
+    async putReport(_project, id, body) {
+      const existing = reports.get(id);
+      arrivals.push(`draft:${id}`);
+      if (!existing || body.clientUpdatedAt > existing.clientUpdatedAt) {
+        reports.set(id, { draft: body.draft, clientUpdatedAt: body.clientUpdatedAt, puts: (existing?.puts ?? 0) + 1 });
       }
       return {};
     },
@@ -53,7 +63,7 @@ function fakeServer() {
       return {};
     },
   };
-  return { photos, pins, arrivals, transport };
+  return { photos, pins, reports, arrivals, transport };
 }
 
 beforeEach(() => {
@@ -140,6 +150,7 @@ describe("sync engine", () => {
     const transport: SyncTransport = {
       putPhoto: async () => Promise.reject(httpError(401)),
       putPin: async () => Promise.reject(httpError(401)),
+      putReport: async () => Promise.reject(httpError(401)),
     };
     const engine = createSyncEngine({ transport, isOnline: () => true });
     await captureFiles(PROJECT, [jpeg("a.jpg"), jpeg("b.jpg")], { downscale: fakeDownscale });

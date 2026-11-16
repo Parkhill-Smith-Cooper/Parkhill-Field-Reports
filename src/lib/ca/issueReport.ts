@@ -1,6 +1,6 @@
 import "server-only";
 
-import { isCaError, type CaRepository } from "@/lib/ca/contracts";
+import { CaConflictError, isCaError, type CaRepository } from "@/lib/ca/contracts";
 import type { CaReport, CaReportRevision } from "@/types/ca";
 
 import { buildRevision } from "./revisions";
@@ -21,11 +21,31 @@ export async function issueReport(input: {
   reportId: string;
   issuedBy: string;
   now?: Date;
+  /**
+   * The `draftUpdatedAt` of the version the engineer reviewed. If the stored
+   * draft is a different version (edited on another device, or this device's
+   * latest edit has not synced), issuing is refused rather than freezing a
+   * version nobody looked at.
+   */
+  expectedDraftUpdatedAt?: string;
 }): Promise<{ report: CaReport; revision: CaReportRevision } | null> {
   const { repo, projectNumber, reportId, issuedBy } = input;
 
   const report = await repo.reports.get(projectNumber, reportId);
   if (!report) return null;
+
+  if (input.expectedDraftUpdatedAt !== undefined && input.expectedDraftUpdatedAt !== report.draftUpdatedAt) {
+    throw new CaConflictError(
+      "This report has changed since you opened it (perhaps on another device). Review the latest version, then issue.",
+    );
+  }
+
+  // Nothing changed since the last issue (e.g. a retried tap after success):
+  // return that revision instead of creating an identical new one.
+  if (report.latestRevision !== null && !report.hasUnissuedChanges) {
+    const latest = await repo.reports.getRevision(projectNumber, reportId, report.latestRevision);
+    if (latest) return { report, revision: latest };
+  }
 
   const photos = await repo.photos.list(projectNumber);
   const photoPaths = Object.fromEntries(photos.map((p) => [p.id, p.filePath]));

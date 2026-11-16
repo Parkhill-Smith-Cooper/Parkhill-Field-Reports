@@ -1,0 +1,474 @@
+/*
+ * Parkhill Field Observation Report.
+ *
+ * Ported from "Field Observation Report - Template.html": same structure,
+ * class names, measurements and colours, scoped under `.ca-report` so none of
+ * it can leak into the rest of the app (CX print styles are untouched).
+ *
+ * Differences from the template, all deliberate:
+ * - Photos are laid out in explicit rows of two. Each row is one unbreakable
+ *   block, so a row is never split across pages; a single photo sits in the
+ *   left column; an item with no photos shows the template's two empty
+ *   "Photo" boxes.
+ * - "Date" is labelled "Date Visited", and the template's empty grid cell
+ *   holds "Date Issued" (also in the footer, as in the template).
+ * - The red band shows the report number and revision on the right.
+ * - The page rules use a named page (`ca-report`), applied only while a CA
+ *   report is on screen, instead of the template's global `@page`.
+ */
+
+@page ca-report {
+  size: letter;
+  margin: 0.4in 0.35in 0.7in;
+
+  @bottom-left {
+    content: "Parkhill Field Observation Report";
+    font: 6.5pt Arial, Helvetica, sans-serif;
+    color: #777;
+    border-top: 1.5px solid #c8102e;
+    vertical-align: top;
+    padding-top: 5px;
+    margin-top: 0.3in;
+    width: 3.3in;
+  }
+  @bottom-center {
+    content: "Page " counter(page) " of " counter(pages);
+    font: 6.5pt Arial, Helvetica, sans-serif;
+    color: #777;
+    border-top: 1.5px solid #c8102e;
+    vertical-align: top;
+    padding-top: 5px;
+    margin-top: 0.3in;
+    width: 1.2in;
+  }
+  @bottom-right {
+    content: "Building Community";
+    font: bold 6.5pt Arial, Helvetica, sans-serif;
+    color: #c8102e;
+    border-top: 1.5px solid #c8102e;
+    vertical-align: top;
+    padding-top: 5px;
+    margin-top: 0.3in;
+    text-align: right;
+    width: 3.3in;
+  }
+}
+
+@media print {
+  :root:has([data-print="ca-report"]) {
+    page: ca-report;
+  }
+  /* The app's page frame adds padding on screen; on paper the @page margins are the frame. */
+  :root:has([data-print="ca-report"]) main > div {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  /* Spacing between the (hidden) on-screen chrome would push page 1 down. */
+  :root:has([data-print="ca-report"]) main :not(.ca-report, .ca-report *) {
+    gap: 0 !important;
+  }
+  .ca-report-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+    width: auto !important;
+    zoom: 1 !important;
+  }
+  .ca-report .screen-only {
+    display: none !important;
+  }
+}
+
+/* On screen: a Letter-width sheet; the page scales it to fit (see CaReportDocument). */
+.ca-report-sheet {
+  width: 8.5in;
+  background: #fff;
+  border: 1px solid #ddd;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  padding: 0.4in 0.35in;
+}
+
+.ca-report,
+.ca-report * {
+  box-sizing: border-box;
+}
+/*
+ * The app's base styles (Chakra's reset) set a 1.5 line height and strip the
+ * browser's bold from headings and table headers. The template assumes
+ * browser defaults, so restore them inside the report.
+ */
+.ca-report {
+  line-height: normal;
+}
+.ca-report h3,
+.ca-report h4,
+.ca-report th,
+.ca-report b {
+  font-weight: bold;
+}
+.ca-report {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #222;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+.ca-report table.layout {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ca-report table.layout > thead > tr > td,
+.ca-report table.layout > tbody > tr > td {
+  padding: 0;
+}
+.ca-report .hdr {
+  padding-bottom: 0.12in;
+}
+.ca-report .band {
+  background: #c8102e;
+  color: #fff;
+  height: 0.46in;
+  display: flex;
+  align-items: center;
+  padding: 0 0.19in;
+}
+.ca-report .logo {
+  height: 0.25in;
+  flex: none;
+}
+.ca-report .ttl {
+  margin-left: 0.17in;
+  font-weight: bold;
+  font-size: 9.5pt;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ca-report .rev {
+  margin-left: auto;
+  font-size: 7.5pt;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ca-report .draftmark {
+  border: 1.5px dashed #c8102e;
+  color: #c8102e;
+  font-weight: bold;
+  font-size: 8pt;
+  letter-spacing: 0.14em;
+  text-align: center;
+  padding: 4px;
+  margin: 0 0 0.08in;
+}
+.ca-report .body {
+  padding: 0 0.42in;
+}
+
+/* Project info + project photo */
+.ca-report .info {
+  background: #f4f4f4;
+  border-bottom: 1px solid #ddd;
+  padding: 0.16in 0.42in;
+  display: flex;
+  gap: 0.25in;
+  align-items: stretch;
+  margin-bottom: 0.06in;
+}
+.ca-report .grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.05fr 1.5fr;
+  column-gap: 0.2in;
+  row-gap: 0.09in;
+  align-content: center;
+}
+.ca-report .fld {
+  border-left: 3px solid #c8102e;
+  padding-left: 0.1in;
+}
+.ca-report .lb {
+  color: #c8102e;
+  font-weight: bold;
+  font-size: 6.8pt;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ca-report .v {
+  font-size: 9.5pt;
+  margin-top: 1px;
+  min-height: 12pt;
+}
+.ca-report .pphoto {
+  width: 2.05in;
+  height: 1.55in;
+  flex: none;
+  border: 1px dashed #b5b5b5;
+  background: #e9e9e9;
+  border-radius: 3px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  font-size: 8pt;
+  letter-spacing: 0.08em;
+}
+.ca-report .pphoto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.ca-report .pphoto.has {
+  border: none;
+}
+
+/* Chips */
+.ca-report .cond {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 0.35in;
+  row-gap: 0.08in;
+  margin-top: 0.2in;
+}
+.ca-report .grp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.ca-report .sl {
+  font-size: 7pt;
+  letter-spacing: 0.2em;
+  color: #888;
+  text-transform: uppercase;
+  margin-right: 0.06in;
+}
+.ca-report .chip {
+  display: inline-block;
+  border: 1px solid #ccc;
+  border-radius: 12px;
+  padding: 3px 11px;
+  font-size: 8pt;
+}
+.ca-report .chip.on {
+  background: #c8102e;
+  border-color: #c8102e;
+  color: #fff;
+  font-weight: bold;
+}
+.ca-report .chip.temp {
+  border-style: dashed;
+}
+
+/* Notice */
+.ca-report .notice {
+  border: 1px solid #c8102e;
+  border-left: 4px solid #c8102e;
+  background: #fdf1f3;
+  padding: 0.12in 0.17in;
+  margin-top: 0.17in;
+  break-inside: avoid;
+}
+.ca-report .notice h4 {
+  margin: 0 0 5px;
+  color: #c8102e;
+  font-size: 8pt;
+  letter-spacing: 0.1em;
+}
+.ca-report .notice p {
+  margin: 0 !important;
+  font-size: 8pt !important;
+  line-height: 1.55;
+}
+
+/* Sections */
+.ca-report h3 {
+  border-left: 3px solid #c8102e;
+  padding-left: 0.1in;
+  font-size: 8.5pt;
+  letter-spacing: 0.2em;
+  margin: 0.24in 0 0.1in;
+  text-transform: uppercase;
+  break-after: avoid;
+}
+.ca-report .body p {
+  font-size: 9pt;
+  line-height: 1.6;
+  margin: 0 0 0.09in;
+  white-space: pre-line;
+}
+.ca-report .disc {
+  font-style: italic;
+  color: #999;
+  font-size: 7pt !important;
+  line-height: 1.3 !important;
+  white-space: normal !important;
+}
+
+/* Persons present table */
+.ca-report .subh {
+  font-size: 9pt;
+  font-weight: bold;
+  margin: 0 0 0.06in;
+}
+.ca-report table.people {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.5pt;
+  margin-bottom: 0.14in;
+}
+.ca-report table.people th {
+  background: #f4f4f4;
+  color: #c8102e;
+  font-size: 6.8pt;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1.5px solid #c8102e;
+}
+.ca-report table.people td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #e2e2e2;
+  vertical-align: top;
+}
+.ca-report table.people td:nth-child(3) {
+  color: #555;
+}
+.ca-report table.people tr {
+  break-inside: avoid;
+}
+.ca-report table.people td.none {
+  color: #999;
+  font-style: italic;
+}
+
+/* Observation items */
+.ca-report .item {
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+  padding: 0.13in 0.17in 0.15in;
+  margin-top: 0.15in;
+  break-inside: avoid-page;
+}
+/* An item with more than one row of photos may be taller than a page: let it
+   break between rows, keeping its heading, text and first row together. */
+.ca-report .item.long {
+  break-inside: auto;
+}
+.ca-report .item .keep {
+  break-inside: avoid;
+}
+.ca-report .ih {
+  display: flex;
+  align-items: center;
+  gap: 0.12in;
+  font-size: 9pt;
+}
+.ca-report .badge {
+  background: #e8e8e8;
+  color: #666;
+  border-radius: 10px;
+  padding: 2px 11px;
+  font-size: 6.5pt;
+  font-weight: bold;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ca-report .badge.def {
+  background: #c8102e;
+  color: #fff;
+}
+.ca-report .item p {
+  margin: 0.08in 0 0.12in !important;
+}
+.ca-report .photo-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.14in;
+  break-inside: avoid;
+}
+.ca-report .photo-row + .photo-row {
+  margin-top: 0.14in;
+}
+.ca-report .ph {
+  margin: 0;
+  break-inside: avoid;
+}
+.ca-report .photo {
+  height: 2.5in;
+  border: 1px dashed #bbb;
+  background: #f1f1f1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  font-size: 8pt;
+  letter-spacing: 0.1em;
+  overflow: hidden;
+}
+.ca-report .photo.has {
+  border: none;
+  background: #f4f4f4;
+}
+.ca-report .photo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.ca-report .pcap {
+  font-size: 7pt;
+  color: #888;
+  margin-top: 4px;
+  white-space: pre-line;
+}
+
+/* Distribution */
+.ca-report .dist {
+  border-top: 1.5px solid #c8102e;
+  margin-top: 0.22in;
+  padding-top: 0.15in;
+  display: flex;
+  align-items: center;
+  break-inside: avoid;
+}
+.ca-report .dist .k {
+  font-size: 7pt;
+  font-weight: bold;
+  letter-spacing: 0.14em;
+  margin-right: 0.18in;
+}
+.ca-report .box {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.2px solid #c8102e;
+  margin: 0 5px -1px 0;
+}
+.ca-report .box.on {
+  background: #c8102e;
+}
+.ca-report .dist span.o {
+  font-size: 8pt;
+  margin-right: 0.13in;
+}
+
+/* Screen-only stand-in for the printed page footer (margin boxes only exist on paper). */
+.ca-report .screen-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.2in;
+  border-top: 1.5px solid #c8102e;
+  margin-top: 0.3in;
+  padding-top: 5px;
+  font-size: 6.5pt;
+  color: #777;
+}
+.ca-report .screen-footer b {
+  color: #c8102e;
+}

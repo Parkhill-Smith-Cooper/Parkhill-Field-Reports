@@ -2,6 +2,7 @@
 
 import type { PhotoMeta } from "@/services/ca/photoService";
 import type { PinBody } from "@/services/ca/pinService";
+import type { ReportPutBody } from "@/services/ca/reportService";
 
 import { openCaDb, type OutboxEntry } from "./db";
 import { emitCaLocalChange } from "./events";
@@ -26,6 +27,7 @@ import { emitCaLocalChange } from "./events";
 export type SyncTransport = {
   putPhoto(projectNumber: string, photoId: string, meta: PhotoMeta, file?: Blob): Promise<unknown>;
   putPin(projectNumber: string, pinId: string, body: PinBody): Promise<unknown>;
+  putReport(projectNumber: string, reportId: string, body: ReportPutBody): Promise<unknown>;
 };
 
 /** Thrown by transports for HTTP failures; anything else counts as network. */
@@ -166,6 +168,26 @@ export function createSyncEngine(deps: {
     if (!changed) await db.delete("outbox", entry.key);
   }
 
+  async function processDraft(entry: OutboxEntry): Promise<void> {
+    const db = await openCaDb();
+    const draft = await db.get("drafts", entry.entityId);
+    if (!draft) {
+      await db.delete("outbox", entry.key);
+      return;
+    }
+    await deps.transport.putReport(draft.projectNumber, draft.id, {
+      draft: draft.content,
+      clientUpdatedAt: draft.clientUpdatedAt,
+      createdAt: draft.createdAt,
+    });
+    const latest = await db.get("drafts", draft.id);
+    const changed = latest && latest.clientUpdatedAt !== draft.clientUpdatedAt;
+    if (latest) {
+      await db.put("drafts", { ...latest, syncState: changed ? "pending" : "synced", lastError: undefined });
+    }
+    if (!changed) await db.delete("outbox", entry.key);
+  }
+
   async function handleFailure(entry: OutboxEntry, error: unknown): Promise<"stop" | "continue"> {
     const db = await openCaDb();
     const message = error instanceof Error ? error.message : "Sync failed.";
@@ -202,6 +224,9 @@ export function createSyncEngine(deps: {
     } else if (entry.kind === "pin") {
       const pin = await db.get("pins", entry.entityId);
       if (pin) await db.put("pins", { ...pin, syncState: "error", lastError: message });
+    } else {
+      const draft = await db.get("drafts", entry.entityId);
+      if (draft) await db.put("drafts", { ...draft, syncState: "error", lastError: message });
     }
     set({ lastError: message });
     return "continue";
@@ -230,7 +255,7 @@ export function createSyncEngine(deps: {
         try {
           if (entry.kind === "photo") await processPhoto(entry);
           else if (entry.kind === "pin") await processPin(entry);
-          else await db.delete("outbox", entry.key); // the draft handler arrives in Phase 4
+          else await processDraft(entry);
         } catch (error) {
           failures += 1;
           if ((await handleFailure(entry, error)) === "stop") {

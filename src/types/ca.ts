@@ -223,6 +223,12 @@ export type CaReport = {
   latestRevision: number | null;
   /** True when the draft has been edited since `latestRevision` was issued. */
   hasUnissuedChanges: boolean;
+  /**
+   * Device time of the draft edit now stored. A sync carrying an older edit is
+   * ignored (newer edit wins), and Issue checks it so a report is only issued
+   * from the version the engineer actually reviewed.
+   */
+  draftUpdatedAt: string;
   createdAt: string;
   createdBy: string;
   updatedAt: string;

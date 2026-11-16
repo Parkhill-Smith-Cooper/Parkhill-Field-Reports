@@ -1,7 +1,10 @@
+import { cookies } from "next/headers";
 import { connection } from "next/server";
 
 import { CaModeBanner } from "@/components/ca/CaModeBanner";
 import { CaOfflineSupport } from "@/components/ca/CaOfflineSupport";
+import { CaUserProvider } from "@/context/CaUserContext";
+import { SESSION_COOKIE, readSessionToken } from "@/lib/auth/session";
 import { caRuntimeInfo } from "@/repositories/ca";
 
 /**
@@ -23,11 +26,13 @@ export default async function CaLayout({ children }: { children: React.ReactNode
     configError = error instanceof Error ? error.message : "Unknown configuration error.";
   }
 
+  const session = await readSessionToken((await cookies()).get(SESSION_COOKIE)?.value);
+
   return (
-    <>
+    <CaUserProvider name={session?.name ?? ""}>
       <CaModeBanner mode={mode} configError={configError} />
       <CaOfflineSupport />
       {children}
-    </>
+    </CaUserProvider>
   );
 }
