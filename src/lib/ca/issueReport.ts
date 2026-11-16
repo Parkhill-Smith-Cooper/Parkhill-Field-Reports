@@ -1,12 +1,9 @@
 import "server-only";
 
-import type { CaRepository } from "@/lib/ca/contracts";
+import { isCaError, type CaRepository } from "@/lib/ca/contracts";
 import type { CaReport, CaReportRevision } from "@/types/ca";
 
-import {
-  buildRevision,
-  RevisionAlreadyExistsError,
-} from "./revisions";
+import { buildRevision } from "./revisions";
 
 /**
  * Issues a report: freezes the current draft as the next immutable revision
@@ -44,7 +41,8 @@ export async function issueReport(input: {
   try {
     revision = await repo.reports.createRevision(candidate);
   } catch (error) {
-    if (!(error instanceof RevisionAlreadyExistsError)) throw error;
+    // By name, not instanceof - see the note on errors in contracts.ts.
+    if (!isCaError(error, "RevisionAlreadyExistsError")) throw error;
     const existing = await repo.reports.getRevision(
       projectNumber,
       reportId,

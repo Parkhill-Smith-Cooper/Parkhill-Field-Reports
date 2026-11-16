@@ -173,7 +173,23 @@ export interface CaReportRenderer {
 
 // ---------------------------------------------------------------------------
 // Errors shared by every implementation
+//
+// Always test these with `isCaError(error, "Name")`, never `instanceof`.
+// Implementations are cached on `globalThis` (so dev hot reload keeps the mock
+// store), and Next compiles each route into its own bundle with its own copy
+// of these classes - so an error thrown by a cached repository is not an
+// `instanceof` the class a different route imported. The name survives.
 // ---------------------------------------------------------------------------
+
+export type CaErrorName =
+  | "CaConflictError"
+  | "CaNotConfiguredError"
+  | "RevisionAlreadyExistsError"
+  | "MissingPhotoError";
+
+export function isCaError(error: unknown, name: CaErrorName): error is Error {
+  return error instanceof Error && error.name === name;
+}
 
 export class CaConflictError extends Error {
   constructor(message: string) {
