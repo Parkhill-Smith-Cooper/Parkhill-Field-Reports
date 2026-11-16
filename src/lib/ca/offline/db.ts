@@ -2,7 +2,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 
-import type { CaProject } from "@/types/ca";
+import type { CaDrawing, CaPin, CaProject } from "@/types/ca";
 
 /**
  * The on-device store for CA Field Reports (IndexedDB).
@@ -15,8 +15,8 @@ import type { CaProject } from "@/types/ca";
  * Stores:
  * - `projects`  cached project records, so a project opens with no signal.
  * - `photos`    captured photos, including the downscaled JPEG bytes.
- * - `pins`      floor-plan pins (Phase 3).
- * - `drawings`  cached drawing sheets for offline viewing (Phase 3).
+ * - `pins`      floor-plan pins, queued for sync like photos.
+ * - `drawings`  drawing records and sheet images, cached for offline viewing.
  * - `drafts`    report drafts (Phase 4).
  * - `outbox`    one entry per record waiting to sync. Keyed by
  *               `{kind}:{entityId}`, so re-queuing the same record replaces
@@ -45,6 +45,25 @@ export type LocalPhoto = {
   lastError?: string;
 };
 
+/** A floor-plan pin as kept on the device (the server adds `createdBy`). */
+export type LocalPin = Omit<CaPin, "createdBy"> & {
+  syncState: SyncState;
+  lastError?: string;
+};
+
+/**
+ * A drawing record plus its sheet image, so a floor plan opens with no
+ * signal. Drawings are added online; this is a read cache, never queued.
+ */
+export type CachedDrawing = {
+  id: string;
+  projectNumber: string;
+  drawing: CaDrawing;
+  /** Null until the sheet image has been downloaded. */
+  blob: Blob | null;
+  cachedAt: string;
+};
+
 export type OutboxKind = "photo" | "pin" | "draft";
 
 export type OutboxEntry = {
@@ -63,8 +82,8 @@ export type OutboxEntry = {
 interface CaDbSchema extends DBSchema {
   projects: { key: string; value: CaProject & { cachedAt: string } };
   photos: { key: string; value: LocalPhoto; indexes: { byProject: string } };
-  pins: { key: string; value: { id: string; projectNumber: string } & Record<string, unknown>; indexes: { byProject: string } };
-  drawings: { key: string; value: { id: string; projectNumber: string } & Record<string, unknown>; indexes: { byProject: string } };
+  pins: { key: string; value: LocalPin; indexes: { byProject: string } };
+  drawings: { key: string; value: CachedDrawing; indexes: { byProject: string } };
   drafts: { key: string; value: { id: string; projectNumber: string } & Record<string, unknown>; indexes: { byProject: string } };
   outbox: { key: string; value: OutboxEntry };
 }

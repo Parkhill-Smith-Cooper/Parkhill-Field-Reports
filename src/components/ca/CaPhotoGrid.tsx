@@ -1,7 +1,7 @@
 "use client";
 
 import { AspectRatio, Badge, Box, Image, SimpleGrid, Text } from "@chakra-ui/react";
-import { LuCircleCheck, LuClock, LuImageOff, LuTriangleAlert } from "react-icons/lu";
+import { LuCircleCheck, LuClock, LuImageOff, LuMapPin, LuTriangleAlert } from "react-icons/lu";
 
 import type { CaPhotoView } from "@/hooks/ca/useCaPhotos";
 import type { SyncState } from "@/lib/ca/offline/db";
@@ -20,14 +20,18 @@ const SYNC_LOOK: Record<SyncState, { label: string; icon: React.ReactNode; bg: s
 export function CaPhotoGrid({
   photos,
   onOpen,
+  pinNames,
 }: {
   photos: CaPhotoView[];
   onOpen: (photo: CaPhotoView) => void;
+  /** Pin id → display name, to show which pin each photo is filed under. */
+  pinNames?: Map<string, string>;
 }) {
   return (
     <SimpleGrid columns={{ base: 2, sm: 3, md: 4 }} gap={{ base: 2, md: 3 }} data-testid="ca-photo-grid">
       {photos.map((photo) => {
         const look = SYNC_LOOK[photo.syncState];
+        const pinName = photo.pinId ? pinNames?.get(photo.pinId) : undefined;
         return (
           <Box
             key={photo.id}
@@ -36,7 +40,7 @@ export function CaPhotoGrid({
             onClick={() => onOpen(photo)}
             data-testid="ca-photo-tile"
             data-sync={photo.syncState}
-            aria-label={`Photo ${photo.caption || photo.fileName}. ${look.label}.`}
+            aria-label={`Photo ${photo.caption || photo.fileName}.${pinName ? ` At ${pinName}.` : ""} ${look.label}.`}
             borderRadius="md"
             _focusVisible={{ outline: "3px solid", outlineColor: "brand.focusRing", outlineOffset: "2px" }}
           >
@@ -63,6 +67,22 @@ export function CaPhotoGrid({
                 >
                   {look.icon}
                 </Badge>
+                {pinName && (
+                  <Badge
+                    position="absolute"
+                    bottom="1.5"
+                    left="1.5"
+                    maxW="calc(100% - 12px)"
+                    bg="blackAlpha.800"
+                    color="white"
+                    size="sm"
+                    gap="1"
+                    data-testid="ca-photo-pin"
+                  >
+                    <LuMapPin aria-hidden />
+                    <Text as="span" truncate>{pinName}</Text>
+                  </Badge>
+                )}
               </Box>
             </AspectRatio>
             <Text fontSize="sm" mt="1" lineClamp={2} color={photo.caption ? "fg" : "fg.subtle"}>

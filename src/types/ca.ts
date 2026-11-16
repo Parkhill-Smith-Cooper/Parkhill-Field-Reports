@@ -58,12 +58,23 @@ export type CaDrawing = {
   sheetNumber?: string;
   /** As labelled by the source, e.g. "100% CD" or "Rev 3". Never inferred. */
   revisionLabel?: string;
+  /** What the engineer supplied: a PDF (one page used) or an image. */
   fileType: CaDrawingFileType;
-  /** For PDFs, the page used as the floor plan (1-based). */
+  /** For PDFs, the page used as the floor plan (1-based). 1 for images. */
   page: number;
   pageCount: number;
-  /** Path within the CA file store. */
+  /** The file the engineer uploaded or imported, for traceability. */
+  originalFileName: string;
+  /**
+   * Path within the CA file store of the sheet IMAGE the app displays and pins
+   * against (PNG/JPEG/WebP). PDFs are rendered to an image on the device at
+   * upload time, so phones never parse a PDF in the field and the sheet works
+   * offline like any photo.
+   */
   filePath: string;
+  /** Pixel size of the sheet image; pins are fractions of it. */
+  width: number;
+  height: number;
   source: "upload" | "ca-app" | "mock";
   externalRef?: string;
   /** Superseded drawings stay so their pins remain meaningful. */
@@ -98,6 +109,10 @@ export type CaPhoto = {
 /**
  * A photo-location pin on a drawing. `x` and `y` are fractions (0-1) of the
  * rendered sheet, so a pin stays put at any zoom level or render resolution.
+ *
+ * A pin's photos are the photos whose `pinId` is this pin's id. The link is
+ * stored on the photo only, so it can never disagree with itself when the
+ * photo and the pin sync separately.
  */
 export type CaPin = {
   id: string;
@@ -107,7 +122,6 @@ export type CaPin = {
   y: number;
   label: string;
   note: string;
-  photoIds: string[];
   createdAt: string;
   createdBy: string;
   clientUpdatedAt: string;

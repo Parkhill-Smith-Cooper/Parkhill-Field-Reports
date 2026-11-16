@@ -11,7 +11,9 @@ import {
   retryBlocked,
   updateLocalPhoto,
 } from "@/lib/ca/offline/photoStore";
+import { createPin, listLocalPins, updatePin } from "@/lib/ca/offline/pinStore";
 import { backoffMs, createSyncEngine, type SyncTransport } from "@/lib/ca/offline/syncEngine";
+import type { PinBody } from "@/services/ca/pinService";
 
 const PROJECT = "MOCK-45371.25.01";
 
@@ -23,22 +25,35 @@ function httpError(status: number, message = `HTTP ${status}`) {
   return Object.assign(new Error(message), { status });
 }
 
-/** A fake server that stores photos by id, like the real idempotent PUT. */
+/** A fake server that stores photos and pins by id, like the real idempotent PUTs. */
 function fakeServer() {
-  const photos = new Map<string, { caption: string; hasFile: boolean; puts: number }>();
+  const photos = new Map<string, { caption: string; hasFile: boolean; puts: number; pinId?: string }>();
+  const pins = new Map<string, PinBody & { puts: number }>();
+  /** Order in which records arrived, e.g. ["pin:capin_…", "photo:caph_…"]. */
+  const arrivals: string[] = [];
   const transport: SyncTransport = {
+    async putPin(_project, id, body) {
+      const existing = pins.get(id);
+      arrivals.push(`pin:${id}`);
+      if (!existing || body.clientUpdatedAt > existing.clientUpdatedAt) {
+        pins.set(id, { ...body, puts: (existing?.puts ?? 0) + 1 });
+      }
+      return {};
+    },
     async putPhoto(_project, id, meta, file) {
       const existing = photos.get(id);
       if (!existing && !file) throw httpError(409, "include the image");
+      arrivals.push(`photo:${id}`);
       photos.set(id, {
         caption: meta.caption,
         hasFile: Boolean(existing?.hasFile || file),
         puts: (existing?.puts ?? 0) + 1,
+        pinId: meta.pinId,
       });
       return {};
     },
   };
-  return { photos, transport };
+  return { photos, pins, arrivals, transport };
 }
 
 beforeEach(() => {
@@ -88,6 +103,7 @@ describe("sync engine", () => {
     let first = true;
     // The server stores the photo, but the response never reaches the phone.
     const flaky: SyncTransport = {
+      ...server.transport,
       async putPhoto(...args) {
         await server.transport.putPhoto(...args);
         if (first) {
@@ -121,7 +137,10 @@ describe("sync engine", () => {
   });
 
   it("an expired session stops the run and keeps everything", async () => {
-    const transport: SyncTransport = { putPhoto: async () => Promise.reject(httpError(401)) };
+    const transport: SyncTransport = {
+      putPhoto: async () => Promise.reject(httpError(401)),
+      putPin: async () => Promise.reject(httpError(401)),
+    };
     const engine = createSyncEngine({ transport, isOnline: () => true });
     await captureFiles(PROJECT, [jpeg("a.jpg"), jpeg("b.jpg")], { downscale: fakeDownscale });
     await engine.syncNow();
@@ -135,6 +154,7 @@ describe("sync engine", () => {
     const engine = createSyncEngine({
       isOnline: () => true,
       transport: {
+        ...server.transport,
         async putPhoto(project, id, meta, file) {
           if (reject && meta.fileName === "bad.jpg") throw httpError(415, "Photos must be JPEG.");
           return server.transport.putPhoto(project, id, meta, file);
@@ -177,6 +197,7 @@ describe("sync engine", () => {
     const engine = createSyncEngine({
       isOnline: () => true,
       transport: {
+        ...server.transport,
         async putPhoto(...args) {
           const result = await server.transport.putPhoto(...args);
           if (editDuringUpload) {
@@ -204,6 +225,49 @@ describe("sync engine", () => {
   it("backs off exponentially up to five minutes", () => {
     expect([1, 2, 3].map(backoffMs)).toEqual([5_000, 10_000, 20_000]);
     expect(backoffMs(30)).toBe(300_000);
+  });
+});
+
+describe("pins", () => {
+  it("a pin and the photos taken into it sync once each, pin first", async () => {
+    const server = fakeServer();
+    const engine = createSyncEngine({ transport: server.transport, isOnline: () => true });
+    const pin = await createPin(PROJECT, { drawingId: "cadwg_1", x: 0.25, y: 0.75 });
+    const { saved } = await captureFiles(PROJECT, [jpeg("a.jpg"), jpeg("b.jpg")], {
+      pinId: pin.id,
+      downscale: fakeDownscale,
+    });
+
+    await engine.syncNow();
+    await engine.syncNow(); // a second pass sends nothing new
+
+    expect(server.pins.get(pin.id)).toMatchObject({ x: 0.25, y: 0.75, puts: 1 });
+    expect(saved.map((id) => server.photos.get(id)?.pinId)).toEqual([pin.id, pin.id]);
+    expect(server.arrivals[0]).toBe(`pin:${pin.id}`);
+    expect(server.arrivals).toHaveLength(3);
+    expect((await listLocalPins(PROJECT))[0].syncState).toBe("synced");
+  });
+
+  it("edits and a deletion made offline go out as the latest version only", async () => {
+    const server = fakeServer();
+    let online = false;
+    const engine = createSyncEngine({ transport: server.transport, isOnline: () => online });
+    const pin = await createPin(PROJECT, { drawingId: "cadwg_1", x: 0.1, y: 0.1 });
+    await updatePin(pin.id, { label: "Mech room" });
+    await updatePin(pin.id, { deleted: true });
+    expect(await (await openCaDb()).count("outbox")).toBe(1);
+
+    await engine.syncNow();
+    expect(server.pins.size).toBe(0);
+
+    online = true;
+    await engine.syncNow();
+    expect(server.pins.get(pin.id)).toMatchObject({ label: "Mech room", deleted: true, puts: 1 });
+  });
+
+  it("clamps pins to the sheet", async () => {
+    const pin = await createPin(PROJECT, { drawingId: "cadwg_1", x: 1.4, y: -0.2 });
+    expect([pin.x, pin.y]).toEqual([1, 0]);
   });
 });
 

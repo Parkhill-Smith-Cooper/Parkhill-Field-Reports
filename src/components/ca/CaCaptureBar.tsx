@@ -26,11 +26,14 @@ const noopSubscribe = () => () => {};
 export function CaCaptureBar({
   projectNumber,
   pinId,
+  allowRapid = true,
   onCaptured,
 }: {
   projectNumber: string;
-  /** Attach new photos to this pin (Phase 3). */
+  /** File new photos under this floor-plan pin. */
   pinId?: string;
+  /** Offer Rapid capture (its full-screen camera cannot open inside a dialog). */
+  allowRapid?: boolean;
   onCaptured?: (photoIds: string[]) => void;
 }) {
   const cameraInput = useRef<HTMLInputElement>(null);
@@ -69,16 +72,19 @@ export function CaCaptureBar({
     const files = Array.from(event.target.files ?? []);
     // Reset so choosing the same file again still fires.
     event.target.value = "";
-    void save(files);
+    // In a pin sheet the photo count updates in place; a toast would cover
+    // the sheet's buttons on a phone.
+    void save(files, { quiet: Boolean(pinId) });
   }
 
   // false on the server and during hydration, then the real answer: avoids a
   // hydration mismatch from reading `navigator` while rendering.
-  const canRapid = useSyncExternalStore(
+  const rapidSupported = useSyncExternalStore(
     noopSubscribe,
     () => Boolean(navigator.mediaDevices?.getUserMedia),
     () => false,
   );
+  const canRapid = allowRapid && rapidSupported;
 
   return (
     <>

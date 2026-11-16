@@ -1,6 +1,7 @@
 "use client";
 
 import type { PhotoMeta } from "@/services/ca/photoService";
+import type { PinBody } from "@/services/ca/pinService";
 
 import { openCaDb, type OutboxEntry } from "./db";
 import { emitCaLocalChange } from "./events";
@@ -24,6 +25,7 @@ import { emitCaLocalChange } from "./events";
 
 export type SyncTransport = {
   putPhoto(projectNumber: string, photoId: string, meta: PhotoMeta, file?: Blob): Promise<unknown>;
+  putPin(projectNumber: string, pinId: string, body: PinBody): Promise<unknown>;
 };
 
 /** Thrown by transports for HTTP failures; anything else counts as network. */
@@ -43,6 +45,8 @@ export type SyncSnapshot = {
   lastSyncedAt: string | null;
   lastError: string | null;
 };
+
+const KIND_ORDER: Record<OutboxEntry["kind"], number> = { pin: 0, photo: 1, draft: 2 };
 
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 5 * 60_000;
@@ -136,6 +140,32 @@ export function createSyncEngine(deps: {
     if (!changed) await db.delete("outbox", entry.key);
   }
 
+  async function processPin(entry: OutboxEntry): Promise<void> {
+    const db = await openCaDb();
+    const pin = await db.get("pins", entry.entityId);
+    if (!pin) {
+      await db.delete("outbox", entry.key);
+      return;
+    }
+    await deps.transport.putPin(pin.projectNumber, pin.id, {
+      drawingId: pin.drawingId,
+      x: pin.x,
+      y: pin.y,
+      label: pin.label,
+      note: pin.note,
+      createdAt: pin.createdAt,
+      clientUpdatedAt: pin.clientUpdatedAt,
+      ...(pin.deleted ? { deleted: true } : {}),
+    });
+    // Same in-flight edit rule as photos: a newer version stays queued.
+    const latest = await db.get("pins", pin.id);
+    const changed = latest && latest.clientUpdatedAt !== pin.clientUpdatedAt;
+    if (latest) {
+      await db.put("pins", { ...latest, syncState: changed ? "pending" : "synced", lastError: undefined });
+    }
+    if (!changed) await db.delete("outbox", entry.key);
+  }
+
   async function handleFailure(entry: OutboxEntry, error: unknown): Promise<"stop" | "continue"> {
     const db = await openCaDb();
     const message = error instanceof Error ? error.message : "Sync failed.";
@@ -169,6 +199,9 @@ export function createSyncEngine(deps: {
     if (entry.kind === "photo") {
       const photo = await db.get("photos", entry.entityId);
       if (photo) await db.put("photos", { ...photo, syncState: "error", lastError: message });
+    } else if (entry.kind === "pin") {
+      const pin = await db.get("pins", entry.entityId);
+      if (pin) await db.put("pins", { ...pin, syncState: "error", lastError: message });
     }
     set({ lastError: message });
     return "continue";
@@ -189,13 +222,15 @@ export function createSyncEngine(deps: {
     for (let guard = 0; guard < 1000 && !stopped; guard++) {
       const due = (await db.getAll("outbox"))
         .filter((e) => !e.blocked && e.nextAttemptAt <= now())
-        .sort((a, b) => a.key.localeCompare(b.key));
+        // Pins first, so a photo never arrives before the pin it is filed under.
+        .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.key.localeCompare(b.key));
       if (due.length === 0) break;
 
       for (const entry of due) {
         try {
           if (entry.kind === "photo") await processPhoto(entry);
-          else await db.delete("outbox", entry.key); // pin/draft handlers arrive in later phases
+          else if (entry.kind === "pin") await processPin(entry);
+          else await db.delete("outbox", entry.key); // the draft handler arrives in Phase 4
         } catch (error) {
           failures += 1;
           if ((await handleFailure(entry, error)) === "stop") {

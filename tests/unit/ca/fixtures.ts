@@ -27,7 +27,6 @@ export function pin(id: string, overrides: Partial<CaPin> = {}): CaPin {
     y: 0.5,
     label: "",
     note: "",
-    photoIds: [],
     createdAt: "2026-07-14T14:30:00.000Z",
     createdBy: "engineer@parkhill.com",
     clientUpdatedAt: "2026-07-14T14:30:00.000Z",

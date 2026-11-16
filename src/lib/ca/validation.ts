@@ -77,17 +77,46 @@ export function validatePin(body: unknown): string | null {
   }
   if (!isStr(body.label, 120)) return "Pin label must be 120 characters or fewer.";
   if (!isStr(body.note, 2000)) return "Pin note must be 2,000 characters or fewer.";
-  if (
-    !Array.isArray(body.photoIds) ||
-    body.photoIds.length > 500 ||
-    !body.photoIds.every(isValidGeneratedId)
-  ) {
-    return "Invalid pin photo list.";
-  }
   if (!isIsoDateTime(body.createdAt) || !isIsoDateTime(body.clientUpdatedAt)) {
     return "Invalid pin timestamps.";
   }
   if (body.deleted !== undefined && !isBool(body.deleted)) return "Invalid pin state.";
+  return null;
+}
+
+/** Sheet image types the server stores. PDFs and SVGs are rendered on the device first. */
+export const CA_DRAWING_IMAGE_TYPES = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+} as const;
+
+export const CA_DRAWING_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Metadata sent with a drawing upload (the sheet image travels as the file). */
+export function validateDrawingMeta(body: unknown): string | null {
+  if (!isObj(body)) return "Drawing details must be an object.";
+  if (!isStr(body.title, 200) || body.title.trim().length === 0) {
+    return "A drawing title is required (200 characters or fewer).";
+  }
+  for (const key of ["sheetNumber", "revisionLabel"] as const) {
+    if (body[key] !== undefined && !isStr(body[key], 60)) return `Invalid ${key}.`;
+  }
+  if (!isStr(body.originalFileName, 260) || body.originalFileName.trim().length === 0) {
+    return "The original file name is required.";
+  }
+  if (body.fileType !== "pdf" && body.fileType !== "image") return "Invalid drawing file type.";
+  for (const key of ["page", "pageCount", "width", "height"] as const) {
+    const v = body[key];
+    if (!(Number.isInteger(v) && (v as number) > 0 && (v as number) <= 100_000)) {
+      return `Invalid drawing ${key}.`;
+    }
+  }
+  if ((body.page as number) > (body.pageCount as number)) return "The page is outside the document.";
+  if (!["upload", "ca-app", "mock"].includes(body.source as string)) return "Invalid drawing source.";
+  if (body.source !== "upload" && !isStr(body.externalRef, MAX_SHORT)) {
+    return "An imported drawing needs its source reference.";
+  }
   return null;
 }
 

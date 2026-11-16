@@ -13,6 +13,7 @@ import {
   Textarea,
 } from "@chakra-ui/react";
 import { useState } from "react";
+import { LuMapPin } from "react-icons/lu";
 
 import { FormField } from "@/components/FormField";
 import { notifyError } from "@/components/ui/toaster";
@@ -24,15 +25,17 @@ import { SYNC_LOOK } from "./CaPhotoGrid";
  * One photo, full size and uncropped, with its caption. Full-screen on phones.
  * Saving writes to the device first; the caption syncs on its own.
  */
-export function CaPhotoSheet({
-  photo,
-  onClose,
-  onSaveCaption,
-}: {
+type SheetProps = {
   photo: CaPhotoView | null;
   onClose: () => void;
   onSaveCaption: (id: string, caption: string) => Promise<void>;
-}) {
+  /** Name of the pin the photo is filed under, if any. */
+  pinName?: string;
+  /** Takes the photo off its pin (it stays in the project). */
+  onUnpin?: (id: string) => Promise<void>;
+};
+
+export function CaPhotoSheet({ photo, onClose, onSaveCaption, pinName, onUnpin }: SheetProps) {
   return (
     <Dialog.Root
       open={photo !== null}
@@ -44,7 +47,16 @@ export function CaPhotoSheet({
         <Dialog.Backdrop />
         <Dialog.Positioner>
           {/* Keyed by photo, so the caption draft resets for each photo. */}
-          {photo && <SheetBody key={photo.id} photo={photo} onClose={onClose} onSaveCaption={onSaveCaption} />}
+          {photo && (
+            <SheetBody
+              key={photo.id}
+              photo={photo}
+              onClose={onClose}
+              onSaveCaption={onSaveCaption}
+              pinName={pinName}
+              onUnpin={onUnpin}
+            />
+          )}
         </Dialog.Positioner>
       </Portal>
     </Dialog.Root>
@@ -55,11 +67,9 @@ function SheetBody({
   photo,
   onClose,
   onSaveCaption,
-}: {
-  photo: CaPhotoView;
-  onClose: () => void;
-  onSaveCaption: (id: string, caption: string) => Promise<void>;
-}) {
+  pinName,
+  onUnpin,
+}: SheetProps & { photo: CaPhotoView }) {
   const [caption, setCaption] = useState(photo.caption);
   const [saving, setSaving] = useState(false);
   const look = SYNC_LOOK[photo.syncState];
@@ -99,6 +109,24 @@ function SheetBody({
             <Text>·</Text>
             <Text>Taken {new Date(photo.takenAt).toLocaleString()}</Text>
           </HStack>
+          {pinName && onUnpin && (
+            <HStack justify="space-between" gap="3" borderWidth="1px" borderColor="line" borderRadius="md" px="3" py="2">
+              <HStack gap="2" minW="0">
+                <LuMapPin aria-hidden />
+                <Text truncate>At {pinName}</Text>
+              </HStack>
+              <Button
+                variant="ghost"
+                size="md"
+                flexShrink="0"
+                onClick={() =>
+                  onUnpin(photo.id).then(onClose, (error: unknown) => notifyError("Could not remove the photo from the pin", error))
+                }
+              >
+                Remove from pin
+              </Button>
+            </HStack>
+          )}
           {photo.lastError && (
             <Text fontSize="sm" color="fg.error">
               {photo.lastError}

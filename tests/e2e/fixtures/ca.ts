@@ -60,3 +60,22 @@ export async function waitForOfflineReady(page: Page) {
     )
     .toBe(true);
 }
+
+export async function serverPins(request: APIRequestContext, projectNumber: string) {
+  const response = await request.get(`/api/ca/projects/${encodeURIComponent(projectNumber)}/pins`);
+  return ((await response.json()) as { pins: { id: string; label: string; x: number; y: number; deleted?: boolean }[] }).pins;
+}
+
+export async function serverDrawings(request: APIRequestContext, projectNumber: string) {
+  const response = await request.get(`/api/ca/projects/${encodeURIComponent(projectNumber)}/drawings`);
+  return (
+    (await response.json()) as {
+      drawings: { id: string; title: string; fileType: string; page: number; pageCount: number; source: string }[];
+    }
+  ).drawings;
+}
+
+export async function serverPhotosWithPins(request: APIRequestContext, projectNumber: string) {
+  const response = await request.get(`/api/ca/projects/${encodeURIComponent(projectNumber)}/photos`);
+  return ((await response.json()) as { photos: { id: string; pinId?: string }[] }).photos;
+}
