@@ -1,5 +1,18 @@
 # Parkhill Field Reports
 
+A web-based field application for Parkhill engineers, with two experiences
+behind one sign-in:
+
+- **CA Field Reports** (`/field-reports`, the landing page): Construction
+  Administration site visits. Capture photos (offline, onto floor-plan pins),
+  write the Parkhill Field Observation Report, and issue it as an immutable,
+  printable revision. See [CA Field Reports](#ca-field-reports).
+- **CX Field Reports** (`/projects`): commissioning observations with AI
+  diagnostics and exports, described below. Switch between the two with the
+  "Field Reports ⌄" control in the header.
+
+## CX Field Reports
+
 A web-based commissioning field application for Parkhill engineers.
 
 An engineer standing in a mechanical room records what they found, works
@@ -26,6 +39,7 @@ Project  →  Field Observation  →  Recommended Diagnostic Checks
 
 ## Contents
 
+- [CA Field Reports](#ca-field-reports)
 - [Technologies](#technologies)
 - [Azure setup](#azure-setup)
 - [Authentication](#authentication)
@@ -36,6 +50,246 @@ Project  →  Field Observation  →  Recommended Diagnostic Checks
 - [Deploying to Azure](#deploying-to-azure)
 - [Design and branding](#design-and-branding)
 - [Known follow-ups](#known-follow-ups)
+
+---
+
+## CA Field Reports
+
+Construction Administration site visits: capture on site (with or without
+signal), then write and issue the Parkhill **Field Observation Report**.
+Built from `CA_plan.pdf` (navigation and workflow) and *Field Observation
+Report – Template.html* (report format).
+
+> **Status.** The front end, workflow, offline sync and API are complete and
+> tested in **mock mode**. Connecting real data (Cosmos/Blob, the CA
+> application's projects and drawing sets) is outstanding. See
+> [Outstanding work for the backend owner](#outstanding-work-for-the-backend-owner)
+> and [docs/ca-integration-contracts.md](docs/ca-integration-contracts.md).
+
+### Navigation
+
+```
+Sign in ─▶ /field-reports  (CA projects)  ──▶  project
+                │                                 ├─ Capture     floor plans + pins, photos (default tab)
+   "Field Reports ⌄" switcher                     ├─ Reports     list ▸ editor ▸ print / issued revisions
+                └─▶ /projects  (CX, unchanged)    └─ Site Route  route from pins + photo times; Start Tracking (placeholder)
+```
+
+- Sign-in, the logo and the "Field Reports" heading land on CA. The chevron
+  menu switches to CX Field Reports. CX URLs are unchanged.
+- Project tabs are real routes, so the phone's back gesture works:
+  `/field-reports/{p}/capture | reports | route`.
+- Reports open inside the Reports tab by query string:
+  - `?report={id}` opens the editor;
+  - `&view=print` opens the printable draft;
+  - `&rev={n}` opens an issued revision.
+
+  This is what lets a report started offline open with no signal (see
+  `src/lib/ca/routes.ts`).
+
+### Features
+
+- **CA projects.** A separate list from CX. New projects are picked from the
+  configured source (mock samples today; VantagePoint or the CA app via
+  config) or entered manually.
+- **Photos.** Take photo (phone camera), choose photos (library,
+  multi-select), or rapid capture (in-app camera for a walk-through).
+  - Photos are downscaled on the device to about 200–400 KB, and captions are
+    editable.
+  - Photos belong to the project, so capture can happen before any report
+    exists.
+- **Floor plans and pins.**
+  - Add a drawing by uploading a PDF (choose the page) or an image, or by
+    importing a sheet from the drawing source. PDFs are rendered to a sheet
+    image on the device, so phones never parse PDFs on site.
+  - The drawing viewer supports pinch, pan and zoom.
+  - **Drop pin** places a pin with one tap. Each pin has a label, a note, and
+    any number of photos, taken directly into it or added later.
+  - Sheets can be marked superseded and are never deleted.
+- **Site Route.**
+  - Shows pins ordered by their first photo's time, joined by a dashed
+    "order of stops" line, with a date filter.
+  - **Start Tracking** is a disabled, clearly labelled placeholder. See
+    [GPS and indoor positioning](#gps-and-indoor-positioning).
+- **Reports.** Every template section is covered:
+  - To / From / Project / Project No. / Date Visited / Time / % Complete;
+  - project photo;
+  - weather and site conditions;
+  - persons present, materials stored, client action items;
+  - work summary and observation items (In Progress / Complete / Deficient /
+    Corrected; description; unlimited photos with per-report captions; reorder);
+  - comments and distribution.
+
+  Any deficient item adds the "Notice of Deficient Items". **Create report
+  from selected photos** (Capture tab) makes one item per pin.
+- **Print / PDF.**
+  - A port of the template's structure and CSS (`src/components/ca/report/`).
+  - Photos print in rows of two; a row never splits across pages; a single
+    photo sits in the left column; no photos shows two empty "Photo" boxes;
+    photos are never cropped.
+  - Footer: "Page X of Y" and Date Issued (Chrome or Edge). Drafts are stamped
+    "DRAFT — NOT ISSUED".
+- **Issue and revisions.**
+  - **Issue** freezes the reviewed version as an immutable revision: Rev 0
+    first, then Rev 1, 2, …
+  - Date Visited and Date Issued are separate. Date Issued is stamped by the
+    server at issue time.
+  - Editing an issued report starts the next revision, and earlier revisions
+    stay viewable and printable exactly as issued.
+  - Issue needs a connection, and is refused if a photo has not uploaded or
+    the report changed on another device.
+
+### Offline
+
+Everything captured is saved on the device **first**, in IndexedDB database
+`parkhill-ca-field-reports`, and synced later:
+
+- **What's stored:** photos (with image bytes), pins, report drafts, cached
+  project records and drawing sheets.
+- **Sync** (`src/lib/ca/offline/syncEngine.ts`):
+  - An outbox keyed `{kind}:{id}`, so a record is queued at most once.
+  - Device-generated ids and idempotent PUTs mean no duplicates.
+  - The newer edit wins.
+  - Backoff runs from 5 s to 5 min.
+  - A 401 pauses sync with "Sign in to sync".
+  - Rejected records are marked failed, with tap-to-retry.
+- **Triggers:** app start, signal returning, returning to the app, every edit,
+  and a 15 s tick. Background Sync does not exist on iOS, so sync runs while
+  the app is open.
+- **Sync status pill** in the project header: All synced / N waiting /
+  Offline — N saved on this device / N failed — tap to retry / Sign in to
+  sync. Per-item badges show the same states.
+- **Service worker** (`public/sw.js`, scope `/field-reports`, so CX is never
+  affected):
+  - Keeps CA screens loadable offline.
+  - Opening a project online also caches its three tabs and their scripts.
+- **Housekeeping:** synced photos older than 30 days are removed from the
+  device. Unsynced photos are never removed.
+
+### Architecture
+
+Same layering as CX:
+
+```
+component → src/services/ca/* → /api/ca/* (caRoute) → contracts (src/lib/ca/contracts.ts) → mock | Azure implementation
+```
+
+- **Wiring:** `src/repositories/ca/index.ts` picks each implementation from
+  `src/lib/ca/config.ts`.
+- **Errors:** compare CA errors with `isCaError(error, "Name")`, never
+  `instanceof`. Repositories are cached on `globalThis`, and Next bundles each
+  route separately.
+- **Data model:** in `src/types/ca.ts`, documented in
+  [docs/ca-integration-contracts.md](docs/ca-integration-contracts.md#6-data-model).
+- **Cosmos:** four containers, all partitioned on `/projectNumber`: `caProjects`,
+  `caCapture` (photos and pins), `caDrawings`, and `caReports` (reports,
+  revisions, report counter).
+- **Blob:** one private container, `ca-files`.
+
+### Configuration and mock mode
+
+The CA environment variables are blank placeholders in `.env.example` (none are
+secrets). The full table is in
+[docs/ca-integration-contracts.md](docs/ca-integration-contracts.md#2-configuration).
+
+- `CA_DATA_MODE=mock` is the development default. Data lives in
+  `.ca-dev-data/` (git-ignored) and files are served by `/api/ca/files/…`.
+- A yellow **MOCK DATA** banner and **MOCK** tags are always visible in mock
+  mode.
+- `CA_DATA_MODE=azure` uses Cosmos and Blob through the app's managed identity.
+  It never falls back to mock, and **production requires `CA_DATA_MODE` to be
+  set**.
+- `CA_PROJECT_SOURCE` and `CA_DRAWING_SOURCE` choose `mock`, `vantagepoint`
+  (projects only), `ca-app` (stub until connected) or `none`.
+
+### Testing
+
+| Command | Covers |
+| --- | --- |
+| `npm test` | 79 unit tests: config, validation, mock and Cosmos repositories (shared contract tests; Cosmos against an in-memory stand-in), offline sync (outbox, retries, no duplicates, auth pause, edits during upload), site route ordering, report layout, issuing and revisions |
+| `npm run test:e2e` | 42 browser tests at phone (390×844) and desktop (1280×800) |
+
+The browser tests cover:
+
+- CX regression;
+- the sign-in gate;
+- CA navigation;
+- capture, offline capture, reload and exactly-once sync;
+- rapid capture;
+- drawings (import, PDF page choice);
+- pins, including offline pins;
+- Site Route;
+- the full report flow: from photos, through editing and the print layout
+  rules, to Rev 0 and Rev 1;
+- the printed PDF's footer;
+- a report started offline.
+
+How the tests are isolated:
+
+- They never touch Azure. CA runs in mock mode against `.ca-dev-data/e2e`, and
+  CX `/api` calls are intercepted with fixtures.
+- Sign-in is not bypassed in the app. The test fixture signs a session cookie
+  with the local `SESSION_SECRET`.
+
+`next start` prints a warning about `output: "standalone"` during the browser
+tests. It is harmless for testing.
+
+### GPS and indoor positioning
+
+Summary of [docs/ca-positioning-research.md](docs/ca-positioning-research.md):
+
+- GPS is not reliable indoors: often 10–50 m off, with no floor level.
+- Web apps cannot track location in the background or with the screen off.
+- Accurate indoor options (Wi-Fi RTT, BLE beacons, UWB, AR) need a native app
+  and/or hardware on site.
+- The route today is therefore rebuilt from pins and photo times, and
+  **Start Tracking is a placeholder** until a positioning approach is chosen.
+
+### Known limitations
+
+- **Untested on real hardware:** iPhone Safari and Android Chrome were not
+  tested on real devices. The tests use Chromium at phone size with a fake
+  camera.
+- **iOS storage:** iOS Safari may clear site data after weeks of non-use
+  unless the app is added to the Home Screen. Recommend **Add to Home
+  Screen**.
+- **Shared devices:** unsynced captures stay on the device after sign-out.
+- **Printing:** the footer and page numbers print in Chrome and Edge only (the
+  template relies on page margin boxes). Issued revisions need a connection
+  to view; drafts preview offline.
+- **Online-only actions:** adding a drawing and issuing a report need a
+  connection.
+- **Conflicts:** concurrent edits to the same draft from two devices: the
+  newer edit wins as a whole; changes are not merged.
+- **Rapid capture** is not offered inside the pin sheet. Take photo and Choose
+  photos are.
+- **No UI yet** for moving pins or renaming drawings. Renaming is possible
+  through the API.
+- **Placeholder home-screen icon** (`public/ca-app-icon.svg`): replace it with
+  an official square Parkhill icon.
+
+### Outstanding work for the backend owner
+
+Details and the exact contracts are in
+[docs/ca-integration-contracts.md](docs/ca-integration-contracts.md).
+
+- [ ] Provision the Cosmos containers `caProjects`, `caCapture`, `caDrawings`
+      and `caReports` (all partitioned on `/projectNumber`), plus the Blob
+      container `ca-files`. Confirm the app identity's roles cover them.
+- [ ] Add a Blob **CORS** rule allowing `GET` from the app origin. It is needed
+      for offline caching of drawing sheets.
+- [ ] Run `CA_DATA_MODE=azure` against a **non-production** account and
+      verify the flows in the contracts doc. The Cosmos and Blob
+      implementations have not run against real services yet.
+- [ ] Set `CA_DATA_MODE=azure` and the source settings in App Service.
+- [ ] Settle the [open questions](docs/ca-integration-contracts.md#7-open-questions)
+      with the CA application owner: API and auth, project identity, where
+      drawing sets live, and **how "latest approved" is determined** (not
+      assumed anywhere).
+- [ ] Implement `caAppProjectSource` and `caAppDrawingSource` in
+      `src/repositories/ca/sources.ts`.
+- [ ] Decide retention for issued revisions and photos, whether reports are
+      written back to the CA app, and whether server-side PDF is needed.
 
 ---
 
@@ -52,6 +306,9 @@ Project  →  Field Observation  →  Recommended Diagnostic Checks
 | Azure auth | Managed identity via `DefaultAzureCredential` — no keys, no connection strings |
 | Sign-in | SAML 2.0 against Microsoft Entra ID, restricted to Parkhill staff |
 | Hosting | Azure App Service (Linux, Node), `output: "standalone"` |
+| CA offline | IndexedDB (`idb`), a service worker (`public/sw.js`), web app manifest |
+| CA drawings | `pdfjs-dist` (PDF page → sheet image, in the browser), `react-zoom-pan-pinch` |
+| Tests | Vitest + `fake-indexeddb` (unit), Playwright (browser and PDF) |
 
 There are no proprietary or platform-specific dependencies. The repository is
 a standard Next.js application that any Node 20+ environment can build and run.
@@ -148,6 +405,9 @@ Open <http://localhost:3000>. Available scripts:
 | `npm start` | Serve a production build |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Unit tests (Vitest, `tests/unit`) |
+| `npm run test:watch` | Unit tests in watch mode |
+| `npm run test:e2e` | Browser tests (Playwright, `tests/e2e`): builds, then runs against `next start` on port 3100 at phone and desktop sizes. `E2E_DEV=1 npm run test:e2e` uses the dev server instead. First run: `npx playwright install chromium` |
 
 If the app starts but every page errors, read the message: a missing
 environment variable is reported by name, with a pointer back to this section.
@@ -194,8 +454,10 @@ src/
     layout.tsx             Root layout: providers, fonts, viewport
     providers.tsx          Chakra provider
     page.tsx               The sign-in page (public)
+    manifest.ts            Home-screen app manifest (CA)
     (app)/                 Everything behind sign-in
       layout.tsx           Adds the application header
+      field-reports/       CA Field Reports (see "CA Field Reports")
       projects/            Project list, project detail
         [projectNumber]/
           observations/
@@ -212,8 +474,15 @@ src/
   repositories/            All Cosmos access (server-only)
   services/                The client's only door to the server
   theme/                   Design tokens — the one place brand colour is set
-  types/                   Shared types across client and server
+  types/                   Shared types across client and server (CA: types/ca.ts)
+public/sw.js               CA offline service worker (scope /field-reports)
+tests/unit, tests/e2e      Vitest and Playwright tests
+docs/                      CA integration contracts and positioning research
 ```
+
+CA code sits beside CX code in `ca/` subfolders (`components/ca`, `hooks/ca`,
+`lib/ca`, `repositories/ca`, `services/ca`, `app/api/ca`), so the two never
+import each other's internals.
 
 The `(app)` folder is a route group: it adds the header to everything inside
 it without appearing in URLs, so `/projects` stays `/projects` while the
@@ -416,7 +685,7 @@ letting everyone in — misconfiguration fails closed.
   → GET  /api/saml/login   builds an AuthnRequest, redirects to Entra
   → (Entra authenticates the user)
   → POST /api/saml/acs     validates the assertion, issues a session cookie
-  → /projects
+  → /field-reports         (CA, the default; or the page the user was trying to reach)
 ```
 
 The Assertion Consumer Service performs four checks in order, and nothing is
@@ -559,7 +828,8 @@ The phone experience is intentional rather than a shrunken desktop page:
 
 ### Printing
 
-The report carries a print stylesheet, so **Print → Save as PDF** produces a
+(CA reports have their own template-faithful print layout; see
+[CA Field Reports](#ca-field-reports).) The CX report carries a print stylesheet, so **Print → Save as PDF** produces a
 usable document today. Application chrome is stripped, page margins are set,
 and photos and observation blocks are kept from splitting across pages. Proper
 server-side PDF generation is a follow-up, not a prerequisite.

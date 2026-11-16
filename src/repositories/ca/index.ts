@@ -2,14 +2,17 @@ import "server-only";
 
 import { caConfig } from "@/lib/ca/config";
 import {
-  CaNotConfiguredError,
   type CaDrawingSource,
   type CaFileStore,
   type CaProjectSource,
   type CaRepository,
 } from "@/lib/ca/contracts";
+import { databaseContainer } from "@/lib/azure/cosmos";
+import { createBlobFileStore } from "@/lib/ca/files/blobFileStore";
 import { createMockFileStore } from "@/lib/ca/files/mockFileStore";
+import { env } from "@/lib/env";
 
+import { createCosmosCaRepository, type CosmosContainerLike } from "./cosmosCaRepository";
 import { createMockCaRepository } from "./mockCaRepository";
 import {
   caAppDrawingSource,
@@ -43,11 +46,15 @@ export function getCaRepository(): CaRepository {
     return globalThis.__caRepository;
   }
 
-  // TODO(Marcelo / Phase 5): Cosmos implementation of CaRepository.
-  throw new CaNotConfiguredError(
-    "CA_DATA_MODE=azure is not available yet: the Cosmos implementation of the " +
-      "CA repository has not been connected. Use CA_DATA_MODE=mock in development.",
-  );
+  // Azure (Cosmos). Built and unit-tested against a stand-in only; see
+  // cosmosCaRepository.ts and docs/ca-integration-contracts.md before use.
+  globalThis.__caRepository = createCosmosCaRepository({
+    projects: databaseContainer(caConfig.cosmosProjectsContainer) as unknown as CosmosContainerLike,
+    capture: databaseContainer(caConfig.cosmosCaptureContainer) as unknown as CosmosContainerLike,
+    drawings: databaseContainer(caConfig.cosmosDrawingsContainer) as unknown as CosmosContainerLike,
+    reports: databaseContainer(caConfig.cosmosReportsContainer) as unknown as CosmosContainerLike,
+  });
+  return globalThis.__caRepository;
 }
 
 export function getCaFileStore(): CaFileStore {
@@ -60,11 +67,12 @@ export function getCaFileStore(): CaFileStore {
     return globalThis.__caFileStore;
   }
 
-  // TODO(Marcelo / Phase 5): Blob implementation of CaFileStore.
-  throw new CaNotConfiguredError(
-    "CA_DATA_MODE=azure is not available yet: the Blob implementation of the " +
-      "CA file store has not been connected.",
-  );
+  // Azure (Blob). Not yet run against a real storage account.
+  globalThis.__caFileStore = createBlobFileStore({
+    account: env.storageAccount,
+    container: caConfig.storageContainer,
+  });
+  return globalThis.__caFileStore;
 }
 
 /** `null` when no upstream project source is configured (manual entry only). */

@@ -245,7 +245,7 @@ export function createMockCaRepository(options: {
         const existing = db.reports[projectNumber]?.[reportId];
         if (!existing) return null;
         const editedAt = clientUpdatedAt ?? now();
-        if (existing.draftUpdatedAt && !newer(editedAt, existing.draftUpdatedAt)) {
+        if (clientUpdatedAt && existing.draftUpdatedAt && !newer(clientUpdatedAt, existing.draftUpdatedAt)) {
           return clone(existing); // a late, older edit: keep the newer draft
         }
         const updated: CaReport = {

@@ -81,8 +81,9 @@ export interface CaReportStore {
   ): Promise<CaReport>;
   /**
    * Replaces the draft. Marks `hasUnissuedChanges` once a revision exists.
-   * Ignored (returns the stored report) when `clientUpdatedAt` is not newer
-   * than the stored `draftUpdatedAt`: a late, older edit never wins.
+   * Ignored (returns the stored report) when a `clientUpdatedAt` is given and
+   * is not newer than the stored `draftUpdatedAt`: a late, older edit never
+   * wins. Without one (a server-side edit) the draft is always replaced.
    */
   saveDraft(
     projectNumber: string,
