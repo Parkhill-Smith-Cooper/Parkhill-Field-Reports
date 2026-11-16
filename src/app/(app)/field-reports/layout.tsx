@@ -1,6 +1,7 @@
 import { connection } from "next/server";
 
 import { CaModeBanner } from "@/components/ca/CaModeBanner";
+import { CaOfflineSupport } from "@/components/ca/CaOfflineSupport";
 import { caRuntimeInfo } from "@/repositories/ca";
 
 /**
@@ -25,6 +26,7 @@ export default async function CaLayout({ children }: { children: React.ReactNode
   return (
     <>
       <CaModeBanner mode={mode} configError={configError} />
+      <CaOfflineSupport />
       {children}
     </>
   );

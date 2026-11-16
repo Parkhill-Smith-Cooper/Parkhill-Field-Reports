@@ -62,5 +62,12 @@ export const config = {
   // Everything except Next's own assets and the logo. The logo is excluded by
   // name so it still renders on the sign-in page, where the visitor is by
   // definition not yet authenticated.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|parkhill-logo.png).*)"],
+  //
+  // Also excluded: the CA service worker script, the web app manifest and its
+  // icon. Browsers fetch the manifest without cookies, and a service worker
+  // update check must not be answered with the sign-in page. None of the
+  // three contain anything sensitive; they are static files.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|parkhill-logo.png|sw.js|manifest.webmanifest|ca-app-icon.svg).*)",
+  ],
 };

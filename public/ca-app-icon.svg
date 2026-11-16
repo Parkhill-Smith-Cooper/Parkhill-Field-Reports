@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- PLACEHOLDER home-screen icon. Replace with an official square Parkhill asset. -->
+  <rect width="512" height="512" rx="96" fill="#C8102E"/>
+  <text x="256" y="350" font-family="Arial, Helvetica, sans-serif" font-size="300" font-weight="bold" fill="#fff" text-anchor="middle">P</text>
+</svg>

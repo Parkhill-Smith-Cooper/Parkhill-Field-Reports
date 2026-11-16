@@ -83,6 +83,13 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** Multipart PUT, for idempotent uploads keyed by a client-generated id (CA). */
+export async function apiPutForm<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(path, { method: "PUT", body: form });
+  if (!response.ok) throw await toError(response);
+  return (await response.json()) as T;
+}
+
 export async function apiPostForm<T>(
   path: string,
   form: FormData,

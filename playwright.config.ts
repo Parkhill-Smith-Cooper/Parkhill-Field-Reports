@@ -10,11 +10,17 @@ import { defineConfig, devices } from "@playwright/test";
  * - Sign-in is not bypassed in the app. The auth fixture signs a session
  *   cookie with the local SESSION_SECRET using the app's own signer.
  *
+ * Target: a PRODUCTION build (`next build` + `next start`) by default - what
+ * engineers actually run, and the only honest target for offline tests (the
+ * dev server's hot-reload client forces reloads when the network drops). Set
+ * E2E_DEV=1 to run against `next dev` instead for quick iteration.
+ *
  * Port 3100, so a normal `npm run dev` on 3000 is left alone.
  */
 
 const PORT = 3100;
 const BASE_URL = `http://localhost:${PORT}`;
+const DEV = process.env.E2E_DEV === "1";
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -31,6 +37,11 @@ export default defineConfig({
     baseURL: BASE_URL,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
+    // Chromium's built-in fake camera, for the Rapid capture tests.
+    permissions: ["camera"],
+    launchOptions: {
+      args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
+    },
   },
 
   projects: [
@@ -48,10 +59,12 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: `npm run dev -- --port ${PORT}`,
+    command: DEV
+      ? `npm run dev -- --port ${PORT}`
+      : `npm run build && npx next start --port ${PORT}`,
     url: `${BASE_URL}/`,
     reuseExistingServer: !process.env.CI,
-    timeout: 180_000,
+    timeout: 600_000,
     env: {
       CA_DATA_MODE: "mock",
       CA_PROJECT_SOURCE: "mock",

@@ -1,6 +1,6 @@
 "use client";
 
-import { Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
+import { Box, Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -8,6 +8,8 @@ import { LuChevronRight } from "react-icons/lu";
 
 import { CaProjectTabs } from "@/components/ca/CaProjectTabs";
 import { CaSourceTag } from "@/components/ca/CaSourceTag";
+import { CaSyncStatus } from "@/components/ca/CaSyncStatus";
+import { cacheProjects, getCachedProject, isNetworkFailure } from "@/lib/ca/offline/projectCache";
 import { PageShell } from "@/components/PageShell";
 import { notifyError } from "@/components/ui/toaster";
 import { CaProjectContext } from "@/context/CaProjectContext";
@@ -39,9 +41,18 @@ export default function CaProjectLayout({ children }: { children: React.ReactNod
     let active = true;
     fetchCaProject(projectNumber)
       .then((result) => {
+        void cacheProjects([result]);
         if (active) setLoaded({ key: projectNumber, project: result });
       })
-      .catch((error: unknown) => {
+      .catch(async (error: unknown) => {
+        // No connection: open the copy cached on this device, if there is one.
+        if (isNetworkFailure(error)) {
+          const cached = await getCachedProject(projectNumber);
+          if (cached) {
+            if (active) setLoaded({ key: projectNumber, project: cached });
+            return;
+          }
+        }
         if (!active) return;
         setLoaded({
           key: projectNumber,
@@ -92,7 +103,14 @@ export default function CaProjectLayout({ children }: { children: React.ReactNod
         title={project.name}
         description={[`Project ${project.projectNumber}`, project.client].filter(Boolean).join(" · ")}
         width="5xl"
-        actions={<CaSourceTag source={project.source} />}
+        actions={
+          <Stack direction={{ base: "column", md: "row" }} align={{ base: "stretch", md: "center" }} gap="3">
+            <CaSyncStatus />
+            <Box alignSelf={{ base: "flex-start", md: "center" }}>
+              <CaSourceTag source={project.source} />
+            </Box>
+          </Stack>
+        }
       >
         <Stack gap={{ base: 5, md: 6 }}>
           <CaProjectTabs projectNumber={projectNumber} />

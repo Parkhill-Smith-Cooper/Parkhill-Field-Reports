@@ -21,6 +21,7 @@
     "@emotion/react": "11.14.0",
     "@node-saml/node-saml": "^5.1.0",
     "exceljs": "^4.4.0",
+    "idb": "^8.0.4",
     "jose": "^6.2.12",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.9",

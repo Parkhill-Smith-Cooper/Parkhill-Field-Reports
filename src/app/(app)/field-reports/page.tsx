@@ -27,6 +27,12 @@ import { EmptyState } from "@/components/EmptyState";
 import { SectionEyebrow } from "@/components/FieldReportsMenu";
 import { PageShell } from "@/components/PageShell";
 import { notifyError } from "@/components/ui/toaster";
+import {
+  cacheProjects,
+  forgetCachedProject,
+  getCachedProjects,
+  isNetworkFailure,
+} from "@/lib/ca/offline/projectCache";
 import { caProjectPath } from "@/lib/ca/routes";
 import { fetchCaProjects } from "@/services/ca/projectService";
 import type { CaProject } from "@/types/ca";
@@ -40,12 +46,28 @@ export default function CaProjectsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [offlineCopy, setOfflineCopy] = useState(false);
 
   useEffect(() => {
     let active = true;
     fetchCaProjects()
-      .then((result) => active && setProjects(result))
-      .catch((error: unknown) => {
+      .then((result) => {
+        void cacheProjects(result);
+        if (active) {
+          setProjects(result);
+          setOfflineCopy(false);
+        }
+      })
+      .catch(async (error: unknown) => {
+        // No connection: show the projects this device has opened before.
+        if (isNetworkFailure(error)) {
+          const cached = await getCachedProjects();
+          if (active && cached.length > 0) {
+            setProjects(cached);
+            setOfflineCopy(true);
+            return;
+          }
+        }
         if (!active) return;
         notifyError("Could not load projects", error);
         // Not an empty list: a failure must not read as "no projects".
@@ -113,6 +135,11 @@ export default function CaProjectsPage() {
         />
       ) : (
         <Stack gap="4">
+          {offlineCopy && (
+            <Text fontSize="sm" color="fg.muted" data-testid="ca-offline-projects">
+              Offline — showing projects saved on this device.
+            </Text>
+          )}
           {projects.length > 6 && (
             <InputGroup startElement={<LuSearch />} maxW={{ md: "sm" }}>
               <Input
@@ -183,9 +210,10 @@ export default function CaProjectsPage() {
                     onUpdated={(updated) =>
                       setProjects((current) => (current ?? []).map((p) => (p.id === updated.id ? updated : p)))
                     }
-                    onDeleted={(projectNumber) =>
-                      setProjects((current) => (current ?? []).filter((p) => p.projectNumber !== projectNumber))
-                    }
+                    onDeleted={(projectNumber) => {
+                      void forgetCachedProject(projectNumber);
+                      setProjects((current) => (current ?? []).filter((p) => p.projectNumber !== projectNumber));
+                    }}
                   />
                 </HStack>
               ))}
