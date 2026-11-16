@@ -110,6 +110,7 @@ export function createSyncEngine(deps: {
       ...(photo.pinId ? { pinId: photo.pinId } : {}),
       ...(photo.width ? { width: photo.width } : {}),
       ...(photo.height ? { height: photo.height } : {}),
+      ...(photo.deleted ? { deleted: true } : {}),
     };
 
     try {
@@ -117,7 +118,7 @@ export function createSyncEngine(deps: {
         photo.projectNumber,
         photo.id,
         meta,
-        photo.uploaded || !photo.blob ? undefined : photo.blob,
+        photo.uploaded || photo.deleted || !photo.blob ? undefined : photo.blob,
       );
     } catch (error) {
       // The server says it has never received the bytes: send them next time.
@@ -131,6 +132,12 @@ export function createSyncEngine(deps: {
     // it queued so the newer version is sent next.
     const latest = await db.get("photos", photo.id);
     const changed = latest && latest.clientUpdatedAt !== photo.clientUpdatedAt;
+    // A deletion that reached the server: nothing left to keep on the device.
+    if (latest?.deleted && !changed) {
+      await db.delete("photos", photo.id);
+      await db.delete("outbox", entry.key);
+      return;
+    }
     if (latest) {
       await db.put("photos", {
         ...latest,

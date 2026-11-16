@@ -35,11 +35,11 @@ test("report from photos → edit → print layout → issue Rev 0 → revise �
   await page.getByRole("button", { name: "Create report" }).click();
   await expect(page).toHaveURL(/\/reports\?report=carep_/);
   await expect(page.getByTestId("ca-editor-item")).toHaveCount(1);
-  await expect(page.getByText("Photos (3)")).toBeVisible();
+  await expect(page.getByTestId("ca-editor-item").locator(".photo.has")).toHaveCount(3);
 
   // Fill sections.
   await page.getByLabel("Temperature").fill("72°F");
-  await page.getByRole("button", { name: "Clear" }).first().click();
+  await page.getByRole("button", { name: "Weather: Clear" }).click();
   await page.getByRole("button", { name: "Add person" }).click();
   await page.getByLabel("Person 1 name").fill("Jane Smith");
   await page.getByLabel("Person 1 company").fill("ACME Builders");
@@ -122,7 +122,7 @@ test("report from photos → edit → print layout → issue Rev 0 → revise �
 });
 
 test("a report started offline syncs and gets its number", async ({ page, context }, info) => {
-  const project = num("ROFF", info.project.name);
+  const project = num("ROFF", `${info.project.name}${info.repeatEachIndex || ""}`);
   await createCaProject(page.request, project);
   // Online, the engineer only ever opens the Capture tab.
   await page.goto(capture(project));
@@ -149,7 +149,7 @@ test("a report started offline syncs and gets its number", async ({ page, contex
   await page.waitForTimeout(800); // let the autosave run
   await page.reload();
   await expect(page.getByTestId("ca-report-title")).toHaveText("New report");
-  await expect(page.getByRole("textbox", { name: "Comments" })).toHaveValue("Written with no signal.");
+  await expect(page.getByRole("textbox", { name: "Comments" })).toHaveText("Written with no signal.");
   // Issuing needs a connection, and says so.
   await page.getByRole("button", { name: "Issue report" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Issue Rev 0" }).click();
@@ -162,6 +162,58 @@ test("a report started offline syncs and gets its number", async ({ page, contex
   const reports = await (await page.request.get(`/api/ca/projects/${project}/reports`)).json();
   expect(reports.reports).toHaveLength(1);
   expect(reports.reports[0].draft.comments).toBe("Written with no signal.");
+});
+
+test("photo boxes on the template: take or choose a photo in place", async ({ page }, info) => {
+  const project = num("BOX", info.project.name);
+  await createCaProject(page.request, project);
+  await page.goto(`/field-reports/${project}/reports`);
+  await page.getByRole("button", { name: "New report" }).click();
+  const editor = page.getByTestId("ca-report-editor");
+  await expect(editor).toBeVisible();
+
+  // Typing straight into the template.
+  await page.getByRole("textbox", { name: "Summary of work progress" }).fill("Slab pour complete at Area B.");
+  await page.getByRole("button", { name: "Add observation item" }).click();
+  const item = page.getByTestId("ca-editor-item");
+  // An item with no photos shows the template's two "Photo" boxes - tappable.
+  await expect(item.getByTestId("ca-add-photo-box")).toHaveCount(2);
+
+  // "Choose from device" into the empty box.
+  const chooser = page.waitForEvent("filechooser");
+  await item.getByTestId("ca-add-photo-box").first().click();
+  await page.getByRole("menuitem", { name: "Choose from device" }).click();
+  await (await chooser).setFiles({ name: "slab.jpg", mimeType: "image/jpeg", buffer: await makeJpeg(page, "Slab") });
+  await expect(item.locator(".photo.has")).toHaveCount(1);
+  // Now one "+ Photo" box follows the photo, in the right-hand column.
+  await expect(item.getByTestId("ca-add-photo-box")).toHaveCount(1);
+
+  // "Take photo" uses the camera input (here: a file).
+  const camera = page.waitForEvent("filechooser");
+  await item.getByTestId("ca-add-photo-box").click();
+  await page.getByRole("menuitem", { name: "Take photo" }).click();
+  await (await camera).setFiles({ name: "cam.jpg", mimeType: "image/jpeg", buffer: await makeJpeg(page, "Camera", "#4b5d4b") });
+  await expect(item.locator(".photo.has")).toHaveCount(2);
+  await page.getByRole("textbox", { name: "Item 001 photo 2 caption" }).fill("Taken from the report");
+
+  // Project photo box: pick one of the project's photos.
+  await page.getByTestId("ca-cover-box").click();
+  await page.getByRole("menuitem", { name: "Choose from project photos" }).click();
+  await page.getByTestId("ca-photo-picker").getByTestId("ca-picker-photo").first().click();
+  await page.getByRole("button", { name: "Use photo" }).click();
+  await expect(page.getByTestId("ca-cover-box").locator("img")).toHaveCount(1);
+
+  // Photos added in the report are project photos too, saved and synced.
+  await waitSynced(page);
+  await expect.poll(async () => (await (await page.request.get(`/api/ca/projects/${project}/photos`)).json()).photos.length).toBe(2);
+
+  // The preview prints them in the template's layout.
+  await page.getByRole("link", { name: "Preview / print draft" }).click();
+  const doc = page.getByTestId("ca-report-document");
+  await expect(doc.locator(".photo.has img")).toHaveCount(2);
+  await expect(doc.getByText("Taken from the report")).toBeVisible();
+  await expect(doc.locator(".pphoto.has img")).toHaveCount(1);
+  await expect(doc.getByText("Slab pour complete at Area B.")).toBeVisible();
 });
 
 /** Text of a PDF, per page, using pdf.js in Node. */

@@ -472,3 +472,328 @@
 .ca-report .screen-footer b {
   color: #c8102e;
 }
+
+.ca-report .dist-opt {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---------------------------------------------------------------------------
+ * Editing ON the template (.ca-report.editing). Nothing here changes how a
+ * finished report looks or prints: editing affordances are hover/focus
+ * outlines, placeholders and `.screen-only` controls.
+ * ------------------------------------------------------------------------- */
+
+.ca-report.editing .ef {
+  cursor: text;
+  border-radius: 2px;
+  outline: 1px dashed transparent;
+  outline-offset: 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  transition: background-color 0.12s, outline-color 0.12s;
+}
+.ca-report.editing span.ef {
+  display: inline;
+  min-width: 2em;
+}
+.ca-report.editing .ef:hover {
+  outline-color: rgba(200, 16, 46, 0.45);
+  background: rgba(200, 16, 46, 0.04);
+}
+.ca-report.editing .ef:focus {
+  outline: 2px solid rgba(200, 16, 46, 0.7);
+  background: #fffdf3;
+}
+/* Empty fields say what goes there, and keep a visible line to tap. */
+.ca-report.editing .ef:empty::before {
+  content: attr(data-placeholder);
+  color: #a3a3a3;
+  font-style: italic;
+  pointer-events: none;
+}
+.ca-report.editing .ef:empty {
+  border-bottom: 1px dotted #c9c9c9;
+}
+.ca-report.editing .v.muted {
+  color: #999;
+  font-style: italic;
+}
+
+/* Date / time: the template's text, with the device picker underneath. */
+.ca-report .ef-pick {
+  position: relative;
+  display: block;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.ca-report .ef-pick:hover {
+  background: rgba(200, 16, 46, 0.04);
+  outline: 1px dashed rgba(200, 16, 46, 0.45);
+  outline-offset: 2px;
+}
+.ca-report .ef-pick input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+.ca-report .ef-pick .ph-text {
+  color: #a3a3a3;
+  font-style: italic;
+}
+
+/* Tappable chips, boxes, badge. */
+.ca-report button.tap {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.ca-report button.chip {
+  background: #fff;
+  line-height: normal;
+}
+.ca-report button.chip.on {
+  background: #c8102e;
+  color: #fff;
+}
+.ca-report .chip.off {
+  color: #888;
+  border-style: dashed;
+}
+.ca-report.editing .chip.off .ef:empty::before {
+  font-style: normal;
+}
+.ca-report button.chip:hover {
+  border-color: #c8102e;
+}
+.ca-report button.dist-opt {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  font: inherit;
+  cursor: pointer;
+}
+.ca-report .badge.tap {
+  position: relative;
+  cursor: pointer;
+}
+.ca-report .badge.tap::after {
+  content: " ▾";
+}
+.ca-report .badge-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+/* Photo boxes: the template's dashed "Photo" box, tappable. */
+.ca-report button.photo,
+.ca-report button.pphoto {
+  width: 100%;
+  font: inherit;
+  font-size: 8pt;
+  cursor: pointer;
+  gap: 6px;
+}
+.ca-report button.pphoto {
+  width: 2.05in;
+  font-size: 8pt;
+}
+.ca-report button.photo.add:hover,
+.ca-report button.pphoto:hover {
+  border-color: #c8102e;
+  color: #c8102e;
+  background: #fdf1f3;
+}
+.ca-report button.pphoto.has {
+  padding: 0;
+}
+.ca-report .photo.has {
+  position: relative;
+}
+.ca-report .ph-tools {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+}
+.ca-report .item {
+  position: relative;
+}
+.ca-report .item-tools {
+  position: absolute;
+  top: 0.08in;
+  right: 0.1in;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ca-report .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: rgba(255, 255, 255, 0.92);
+  color: #333;
+  cursor: pointer;
+}
+.ca-report .icon-btn:hover:not(:disabled) {
+  border-color: #c8102e;
+  color: #c8102e;
+}
+.ca-report .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ca-report .text-btn {
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 9pt;
+  cursor: pointer;
+}
+.ca-report .text-btn.danger {
+  background: #c8102e;
+  border-color: #c8102e;
+  color: #fff;
+}
+.ca-report .item-tools .confirm {
+  font-size: 9pt;
+}
+.ca-report table.people .row-x {
+  width: 40px;
+  border-bottom-color: transparent;
+  background: none;
+  padding: 2px;
+}
+.ca-report .add-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: -0.06in 0 0.14in;
+  padding: 6px 2px;
+  border: none;
+  background: none;
+  color: #c8102e;
+  font: inherit;
+  font-size: 9pt;
+  font-weight: bold;
+  cursor: pointer;
+}
+.ca-report .add-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 0.15in;
+  padding: 0.18in;
+  border: 1.5px dashed #c8c8c8;
+  border-radius: 4px;
+  background: #fafafa;
+  color: #c8102e;
+  font: inherit;
+  font-size: 9.5pt;
+  font-weight: bold;
+  cursor: pointer;
+}
+.ca-report .add-item:hover {
+  border-color: #c8102e;
+  background: #fdf1f3;
+}
+
+/* Phones while editing: the page reflows to the screen, same look. */
+.ca-report-sheet.compact {
+  width: 100%;
+  padding: 10px;
+}
+.ca-report-sheet.compact .band {
+  padding: 0 0.12in;
+}
+.ca-report-sheet.compact .ttl {
+  font-size: 7.5pt;
+  letter-spacing: 0.16em;
+}
+.ca-report-sheet.compact .rev {
+  font-size: 6.5pt;
+}
+.ca-report-sheet.compact .info {
+  flex-direction: column;
+  padding: 0.14in;
+}
+.ca-report-sheet.compact .grid {
+  grid-template-columns: 1fr;
+}
+.ca-report-sheet.compact .pphoto,
+.ca-report-sheet.compact button.pphoto {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+}
+.ca-report-sheet.compact .body {
+  padding: 0 0.04in;
+}
+.ca-report-sheet.compact .photo {
+  height: 1.7in;
+}
+.ca-report-sheet.compact .item {
+  padding-top: 0.5in;
+}
+/* iOS zooms into text fields under 16px; keep typing comfortable on phones. */
+@media (max-width: 48em) {
+  .ca-report.editing .ef,
+  .ca-report.editing .ef-pick {
+    font-size: 16px;
+  }
+}
+
+@media print {
+  .ca-report.editing .ef:empty::before {
+    content: none;
+  }
+  .ca-report.editing .ef {
+    outline: none !important;
+    background: none !important;
+    border-bottom: none !important;
+  }
+  .ca-report .badge.tap::after {
+    content: none;
+  }
+  .ca-report .chip.off {
+    display: none;
+  }
+}
+
+/* Chips are buttons while editing; keep the template's chip size (the button
+   reset's `font: inherit` would otherwise enlarge them). */
+.ca-report button.chip {
+  font-size: 8pt;
+  padding: 3px 11px;
+}
+@media (max-width: 48em) {
+  .ca-report.editing button.chip {
+    font-size: 13px;
+    padding: 6px 12px;
+  }
+}
+/* Phones while editing: no room for the number in the band; the editor shows it above. */
+.ca-report-sheet.compact .rev {
+  display: none;
+}
+.ca-report-sheet.compact .ttl {
+  letter-spacing: 0.12em;
+  white-space: normal;
+}

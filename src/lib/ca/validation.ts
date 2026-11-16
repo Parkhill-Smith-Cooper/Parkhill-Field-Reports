@@ -58,6 +58,7 @@ export function validatePhotoMeta(body: unknown): string | null {
   if (body.pinId !== undefined && body.pinId !== null && !isValidGeneratedId(body.pinId)) {
     return "Invalid pin id.";
   }
+  if (body.deleted !== undefined && !isBool(body.deleted)) return "Invalid photo state.";
   for (const key of ["width", "height"] as const) {
     if (body[key] !== undefined && !(Number.isInteger(body[key]) && (body[key] as number) > 0)) {
       return `Invalid photo ${key}.`;

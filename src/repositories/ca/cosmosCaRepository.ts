@@ -295,6 +295,7 @@ export function createCosmosCaRepository(containers: CaCosmosContainers): CaRepo
           ...existing,
           caption: incoming.caption,
           pinId: incoming.pinId,
+          deleted: incoming.deleted,
           clientUpdatedAt: incoming.clientUpdatedAt,
         }));
       },

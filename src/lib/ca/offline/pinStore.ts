@@ -71,7 +71,8 @@ export async function updatePin(
     ...patch,
     ...(patch.x !== undefined ? { x: clamp(patch.x) } : {}),
     ...(patch.y !== undefined ? { y: clamp(patch.y) } : {}),
-    clientUpdatedAt: new Date().toISOString(),
+    // Strictly after the previous edit, so two edits never share a timestamp.
+    clientUpdatedAt: new Date(Math.max(Date.now(), Date.parse(existing.clientUpdatedAt || "0") + 1 || 0)).toISOString(),
     syncState: "pending",
     lastError: undefined,
   };

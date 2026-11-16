@@ -21,7 +21,7 @@ reference; this is the short list of things that are easy to get wrong.
 
 - **Do not regress CX.** Don't refactor CX code to suit CA. CA has changed
   only these CX-shared files, all additively:
-  - `AppHeader` (switcher), `relayState` (landing), the projects-page eyebrow,
+  - `AppHeader` and `FieldReportsMenu` (switcher; no section badge), `relayState` (landing), the projects-page eyebrow,
     the root description;
   - `proxy.ts` (matcher excludes `sw.js`, the manifest and the icon);
   - `apiClient.ts` (`apiPutForm`, `apiGetBlob`);
@@ -61,6 +61,10 @@ reference; this is the short list of things that are easy to get wrong.
   offline-started reports open with no signal.
 - **Issued revisions are immutable:** create-only, `{reportId}_r{n}`, Rev 0
   first. Nothing may update or delete one, or the files it references.
+- **The report editor is the document.** `CaReportDocument` with `editing`
+  renders the template in place (`Editable` contentEditable fields,
+  `PhotoSourceMenu` photo boxes). Keep editing affordances `.screen-only` or
+  hover/focus-only so the printed output never changes.
 - **Print fidelity:** `src/components/ca/report/caReport.css` is a scoped port
   of the template. Keep photo rows (`photoRows`) unbreakable, lone photos in
   the left column, two empty boxes for no photos, and `object-fit: contain`.

@@ -42,7 +42,7 @@ const SectionLabel = ({ children }: { children: React.ReactNode }) => (
  */
 export default function CaCapturePage() {
   const { projectNumber, project } = useCaProject();
-  const { photos, loaded, serverReachable, editPhoto } = useCaPhotos(projectNumber);
+  const { photos, loaded, serverReachable, editPhoto, deletePhoto } = useCaPhotos(projectNumber);
   const { drawings, loaded: drawingsLoaded, refresh: refreshDrawings, added } = useCaDrawings(projectNumber);
   const { pins, dropPin, editPin, deletePin } = useCaPins(projectNumber);
 
@@ -62,7 +62,6 @@ export default function CaCapturePage() {
 
   const numbers = numberPins(pins);
   const pinNames = new Map(pins.map((p) => [p.id, pinName(p, numbers.get(p.id))]));
-  const livePinIds = new Set(pins.map((p) => p.id));
   const photoCount = new Map<string, number>();
   for (const photo of photos) {
     if (photo.pinId) photoCount.set(photo.pinId, (photoCount.get(photo.pinId) ?? 0) + 1);
@@ -269,13 +268,9 @@ export default function CaCapturePage() {
         pin={openPin}
         number={openPin ? (numbers.get(openPin.id) ?? 0) : 0}
         photos={photos}
-        livePinIds={livePinIds}
         onClose={() => setOpenPinId(null)}
         onSave={(patch) => editPin(openPin!.id, patch)}
         onDelete={() => deletePin(openPin!.id)}
-        onAttach={async (ids) => {
-          for (const id of ids) await editPhoto(id, { pinId: openPin!.id });
-        }}
         onOpenPhoto={(p) => setOpenPhotoId(p.id)}
       />
 
@@ -285,6 +280,7 @@ export default function CaCapturePage() {
         onSaveCaption={(id, caption) => editPhoto(id, { caption })}
         pinName={openPhoto?.pinId ? pinNames.get(openPhoto.pinId) : undefined}
         onUnpin={(id) => editPhoto(id, { pinId: undefined })}
+        onDelete={deletePhoto}
       />
     </Stack>
   );

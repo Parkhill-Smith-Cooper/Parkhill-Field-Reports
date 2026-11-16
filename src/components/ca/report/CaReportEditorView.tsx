@@ -6,7 +6,8 @@ import { useEffect, useRef, useState } from "react";
 import { LuArrowLeft, LuClock, LuCircleCheck, LuEye, LuFileCheck, LuTrash2 } from "react-icons/lu";
 
 import { CaReportStateBadge } from "@/components/ca/CaReportStateBadge";
-import { CaReportEditor } from "@/components/ca/report/CaReportEditor";
+import { CaReportDocument } from "@/components/ca/report/CaReportDocument";
+import type { CaPhotoView } from "@/hooks/ca/useCaPhotos";
 import { EmptyState } from "@/components/EmptyState";
 import { notifyError, toaster } from "@/components/ui/toaster";
 import { useCaProject } from "@/context/CaProjectContext";
@@ -164,7 +165,18 @@ export function CaReportEditorView({ reportId }: { reportId: string }) {
         </Stack>
       )}
 
-      <EditorBody key={reportId} initial={r.content} onSave={r.save} photos={photos} pinNames={pinNames} />
+      <Text fontSize="sm" color="fg.muted" data-print="hide">
+        Click any field on the report to type. Tap a photo box to take or add a photo. Changes save on this device as you go.
+      </Text>
+      <EditorBody
+        key={reportId}
+        initial={r.content}
+        onSave={r.save}
+        photos={photos}
+        pinNames={pinNames}
+        projectNumber={projectNumber}
+        reportNumber={r.report?.reportNumber ?? null}
+      />
 
       {latestRevision === null && <DeleteDraft onDelete={remove} />}
     </Stack>
@@ -177,10 +189,14 @@ function EditorBody({
   onSave,
   photos,
   pinNames,
+  projectNumber,
+  reportNumber,
 }: {
   initial: CaReportContent;
   onSave: (content: CaReportContent) => Promise<void>;
-  photos: Parameters<typeof CaReportEditor>[0]["photos"];
+  photos: CaPhotoView[];
+  projectNumber: string;
+  reportNumber: string | null;
   pinNames: Map<string, string>;
 }) {
   const [content, setContent] = useState(initial);
@@ -223,7 +239,17 @@ function EditorBody({
     }, SAVE_DELAY_MS);
   }
 
-  return <CaReportEditor content={content} onChange={change} photos={photos} pinNames={pinNames} />;
+  const urls = new Map(photos.map((p) => [p.id, p.src]));
+  return (
+    <CaReportDocument
+      content={content}
+      photoUrl={(id) => urls.get(id) ?? null}
+      reportNumber={reportNumber}
+      revision={null}
+      dateIssued={null}
+      editing={{ onChange: change, projectNumber, photos, pinNames }}
+    />
+  );
 }
 
 function IssueButton({ label, revision, onIssue }: { label: string; revision: number; onIssue: () => Promise<void> }) {

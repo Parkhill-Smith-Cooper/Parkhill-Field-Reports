@@ -104,6 +104,11 @@ export type CaPhoto = {
   createdAt: string;
   /** Device-side edit time; the newer edit wins on sync. */
   clientUpdatedAt: string;
+  /**
+   * Deleted by an engineer. A tombstone (the record and file are kept) so the
+   * deletion syncs to every device and issued revisions keep their copy.
+   */
+  deleted?: boolean;
 };
 
 /**

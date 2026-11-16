@@ -3,6 +3,7 @@ import "server-only";
 import { CaConflictError, isCaError, type CaRepository } from "@/lib/ca/contracts";
 import type { CaReport, CaReportRevision } from "@/types/ca";
 
+import { referencedPhotoIds } from "./reportContent";
 import { buildRevision } from "./revisions";
 
 /**
@@ -48,7 +49,15 @@ export async function issueReport(input: {
   }
 
   const photos = await repo.photos.list(projectNumber);
-  const photoPaths = Object.fromEntries(photos.map((p) => [p.id, p.filePath]));
+  // A photo deleted after it was added to the draft must be taken out first,
+  // rather than silently printing a photo someone deleted.
+  const deletedIds = new Set(photos.filter((p) => p.deleted).map((p) => p.id));
+  if (referencedPhotoIds(report.draft).some((id) => deletedIds.has(id))) {
+    throw new CaConflictError(
+      "A photo in this report has been deleted. Remove it from the report (it shows as \"Photo not available\"), then issue.",
+    );
+  }
+  const photoPaths = Object.fromEntries(photos.filter((p) => !p.deleted).map((p) => [p.id, p.filePath]));
 
   const candidate = buildRevision({
     report,

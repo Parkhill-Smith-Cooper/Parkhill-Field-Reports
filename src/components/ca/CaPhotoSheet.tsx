@@ -13,7 +13,7 @@ import {
   Textarea,
 } from "@chakra-ui/react";
 import { useState } from "react";
-import { LuMapPin } from "react-icons/lu";
+import { LuMapPin, LuTrash2 } from "react-icons/lu";
 
 import { FormField } from "@/components/FormField";
 import { notifyError } from "@/components/ui/toaster";
@@ -33,9 +33,11 @@ type SheetProps = {
   pinName?: string;
   /** Takes the photo off its pin (it stays in the project). */
   onUnpin?: (id: string) => Promise<void>;
+  /** Deletes the photo from the project (all devices). */
+  onDelete?: (id: string) => Promise<void>;
 };
 
-export function CaPhotoSheet({ photo, onClose, onSaveCaption, pinName, onUnpin }: SheetProps) {
+export function CaPhotoSheet({ photo, onClose, onSaveCaption, pinName, onUnpin, onDelete }: SheetProps) {
   return (
     <Dialog.Root
       open={photo !== null}
@@ -55,6 +57,7 @@ export function CaPhotoSheet({ photo, onClose, onSaveCaption, pinName, onUnpin }
               onSaveCaption={onSaveCaption}
               pinName={pinName}
               onUnpin={onUnpin}
+              onDelete={onDelete}
             />
           )}
         </Dialog.Positioner>
@@ -69,8 +72,10 @@ function SheetBody({
   onSaveCaption,
   pinName,
   onUnpin,
+  onDelete,
 }: SheetProps & { photo: CaPhotoView }) {
   const [caption, setCaption] = useState(photo.caption);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [saving, setSaving] = useState(false);
   const look = SYNC_LOOK[photo.syncState];
   const dirty = caption !== photo.caption;
@@ -143,6 +148,43 @@ function SheetBody({
               rows={2}
             />
           </FormField>
+
+          {onDelete &&
+            (confirmDelete ? (
+              <Stack gap="2" borderWidth="1px" borderColor="border.error" borderRadius="md" p="3" data-testid="ca-photo-delete-confirm">
+                <Text fontWeight="medium">Delete this photo?</Text>
+                <Text fontSize="sm" color="fg.muted">
+                  It is removed from the project on every device. Reports already issued keep their copy; remove it
+                  from any draft report that uses it.
+                </Text>
+                <HStack justify="flex-end">
+                  <Button variant="ghost" size="lg" onClick={() => setConfirmDelete(false)}>
+                    Keep photo
+                  </Button>
+                  <Button
+                    colorPalette="red"
+                    size="lg"
+                    loading={saving}
+                    onClick={async () => {
+                      setSaving(true);
+                      try {
+                        await onDelete(photo.id);
+                        onClose();
+                      } catch (error) {
+                        notifyError("Could not delete the photo", error);
+                        setSaving(false);
+                      }
+                    }}
+                  >
+                    Delete photo
+                  </Button>
+                </HStack>
+              </Stack>
+            ) : (
+              <Button variant="outline" colorPalette="red" size="lg" alignSelf="flex-start" onClick={() => setConfirmDelete(true)}>
+                <LuTrash2 /> Delete photo
+              </Button>
+            ))}
         </Stack>
       </Dialog.Body>
       <Dialog.Footer>

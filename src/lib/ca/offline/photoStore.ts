@@ -23,6 +23,13 @@ import { emitCaLocalChange } from "./events";
 
 type Downscale = (file: File) => Promise<DownscaledImage>;
 
+/** An edit time strictly after `previous`, so two edits can never share a timestamp. */
+function nextStamp(previous: string | undefined): string {
+  const now = Date.now();
+  const prev = previous ? Date.parse(previous) : 0;
+  return new Date(Math.max(now, Number.isNaN(prev) ? 0 : prev + 1)).toISOString();
+}
+
 /** Synced photos older than this are dropped from the device (the server keeps them). */
 const KEEP_SYNCED_DAYS = 30;
 
@@ -125,7 +132,7 @@ export async function updateLocalPhoto(
   const updated: LocalPhoto = {
     ...existing,
     ...patch,
-    clientUpdatedAt: new Date().toISOString(),
+    clientUpdatedAt: nextStamp(existing.clientUpdatedAt),
     syncState: "pending",
     lastError: undefined,
   };
@@ -160,4 +167,34 @@ export async function pruneSyncedPhotos(now = Date.now()): Promise<number> {
     }
   }
   return removed;
+}
+
+/**
+ * Deletes a photo from the project, on this device first.
+ *
+ * The photo becomes a tombstone queued for sync (even if it seems never to
+ * have uploaded - its upload reply may have been lost), so the deletion
+ * reaches the server and every device. Its image bytes are dropped from this
+ * device straight away; after the deletion syncs, the record goes too.
+ *
+ * The server keeps the file, so reports already issued keep their copy.
+ */
+export async function deleteLocalPhoto(
+  id: string,
+  seed?: Omit<LocalPhoto, "caption" | "clientUpdatedAt" | "syncState">,
+): Promise<void> {
+  const db = await openCaDb();
+  const existing = await db.get("photos", id);
+  const base = existing ?? (seed ? { ...seed, caption: "", clientUpdatedAt: "", syncState: "synced" as const } : undefined);
+  if (!base) throw new Error("That photo is not available on this device.");
+  await db.put("photos", {
+    ...base,
+    blob: null,
+    deleted: true,
+    clientUpdatedAt: nextStamp(base.clientUpdatedAt),
+    syncState: "pending",
+    lastError: undefined,
+  });
+  await enqueue("photo", id, base.projectNumber);
+  emitCaLocalChange(base.projectNumber);
 }

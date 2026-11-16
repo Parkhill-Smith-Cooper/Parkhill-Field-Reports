@@ -14,7 +14,7 @@ export async function fetchCaPhotos(projectNumber: string): Promise<CaPhotoWithU
 
 export type PhotoMeta = Pick<
   CaPhoto,
-  "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "width" | "height"
+  "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "width" | "height" | "deleted"
 >;
 
 /**
@@ -26,13 +26,13 @@ export async function putCaPhoto(
   photoId: string,
   meta: PhotoMeta,
   file?: Blob,
-): Promise<CaPhotoWithUrl> {
+): Promise<CaPhotoWithUrl | null> {
   const form = new FormData();
   form.append("meta", JSON.stringify(meta));
   if (file) form.append("file", file, "photo.jpg");
-  const { photo, url } = await apiPutForm<{ photo: CaPhoto; url: string }>(
+  const { photo, url } = await apiPutForm<{ photo: CaPhoto | null; url: string | null }>(
     `${base(projectNumber)}/${encodeURIComponent(photoId)}`,
     form,
   );
-  return { ...photo, url };
+  return photo && url ? { ...photo, url } : null;
 }

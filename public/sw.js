@@ -21,7 +21,7 @@
  *   sign-in redirect is never stored as if it were the page.
  */
 
-const CACHE = "ca-shell-v2";
+const CACHE = "ca-shell-v3";
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -59,7 +59,10 @@ async function networkFirst(request) {
     if (request.mode === "navigate") {
       // Same page, different query (e.g. a report started offline opens at
       // /reports?report=<new id>): the page reads its query in the browser.
-      const samePage = await cache.match(request, { ignoreVary: true, ignoreSearch: true });
+      // Only an HTML page will do: the same path also has cached Next.js
+      // navigation data (`?_rsc=…`), which must never be shown as a page.
+      const candidates = await cache.matchAll(request, { ignoreVary: true, ignoreSearch: true });
+      const samePage = candidates.find((r) => (r.headers.get("content-type") || "").includes("text/html"));
       if (samePage) return samePage;
       // An unvisited CA page: fall back to the project list if we have it.
       const home = await cache.match("/field-reports", { ignoreVary: true });
@@ -87,7 +90,9 @@ async function cacheFirst(request) {
  * For each page, the scripts and styles it references are cached too.
  */
 // Chunk paths contain route groups like "(app)", so ")" must be allowed.
-const STATIC_ASSET = /\/_next\/static\/[^"'\s\\<>]+/g;
+// The page's flight data also lists chunks WITHOUT the "/_next/" prefix
+// ("static/chunks/…"), e.g. code split out for client components.
+const STATIC_ASSET = /(?:\/_next\/)?static\/(?:chunks|css|media)\/[^"'\s\\<>]+/g;
 
 async function keep(cache, href) {
   const response = await fetch(href, { credentials: "same-origin" });
@@ -98,8 +103,11 @@ async function keep(cache, href) {
     return;
   }
   const html = await response.clone().text();
-  await cache.put(href, response);
-  const assets = new Set(html.match(STATIC_ASSET) || []);
+  const assets = new Set(
+    (html.match(STATIC_ASSET) || []).map((a) => (a.startsWith("/_next/") ? a : `/_next/${a}`)),
+  );
+  // Scripts first, page last: once the page is in the cache, everything it
+  // needs is too.
   await Promise.all(
     [...assets].map(async (asset) => {
       try {
@@ -111,6 +119,7 @@ async function keep(cache, href) {
       }
     }),
   );
+  await cache.put(href, response);
 }
 self.addEventListener("message", (event) => {
   const data = event.data;

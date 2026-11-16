@@ -171,6 +171,7 @@ export function createMockCaRepository(options: {
               ...existing,
               caption: photo.caption,
               pinId: photo.pinId,
+              deleted: photo.deleted,
               clientUpdatedAt: photo.clientUpdatedAt,
             }
           : clone(photo);

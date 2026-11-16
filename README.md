@@ -111,7 +111,13 @@ Sign in ─▶ /field-reports  (CA projects)  ──▶  project
     "order of stops" line, with a date filter.
   - **Start Tracking** is a disabled, clearly labelled placeholder. See
     [GPS and indoor positioning](#gps-and-indoor-positioning).
-- **Reports.** Every template section is covered:
+- **Reports, edited on the template itself.** The editor IS the Field
+  Observation Report page: click any field to type, tap chips and
+  distribution boxes to toggle, pick the status from the badge, and tap any
+  photo box (or the project photo box) for **Take photo / Choose from device /
+  Choose from project photos**. On phones the page reflows to the screen width
+  while editing; the printed output is unchanged. Every template section is
+  covered:
   - To / From / Project / Project No. / Date Visited / Time / % Complete;
   - project photo;
   - weather and site conditions;
@@ -207,7 +213,7 @@ secrets). The full table is in
 | Command | Covers |
 | --- | --- |
 | `npm test` | 79 unit tests: config, validation, mock and Cosmos repositories (shared contract tests; Cosmos against an in-memory stand-in), offline sync (outbox, retries, no duplicates, auth pause, edits during upload), site route ordering, report layout, issuing and revisions |
-| `npm run test:e2e` | 42 browser tests at phone (390×844) and desktop (1280×800) |
+| `npm run test:e2e` | 44 browser tests at phone (390×844) and desktop (1280×800) |
 
 The browser tests cover:
 
@@ -219,7 +225,7 @@ The browser tests cover:
 - drawings (import, PDF page choice);
 - pins, including offline pins;
 - Site Route;
-- the full report flow: from photos, through editing and the print layout
+- the full report flow: from photos, through editing on the template and the print layout
   rules, to Rev 0 and Rev 1;
 - the printed PDF's footer;
 - a report started offline.

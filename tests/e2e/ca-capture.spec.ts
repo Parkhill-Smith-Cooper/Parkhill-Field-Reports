@@ -102,3 +102,32 @@ test("rapid capture takes several photos without leaving the app", async ({ page
   await expect(page.getByTestId("ca-photo-tile")).toHaveCount(2);
   await expect.poll(async () => (await serverPhotos(page.request, project)).length).toBe(2);
 });
+
+test("delete a photo: gone from the project, synced as a deletion", async ({ page }, info) => {
+  const project = num("DEL", info.project.name);
+  await createCaProject(page.request, project);
+  await page.goto(capturePath(project));
+  await page.getByTestId("ca-library-input").setInputFiles([
+    { name: "keep.jpg", mimeType: "image/jpeg", buffer: await makeJpeg(page, "Keep") },
+    { name: "oops.jpg", mimeType: "image/jpeg", buffer: await makeJpeg(page, "Oops", "#5c6670") },
+  ]);
+  await expect(page.locator('[data-testid="ca-photo-tile"][data-sync="synced"]')).toHaveCount(2);
+
+  await page.getByRole("button", { name: /Photo oops\.jpg/ }).click();
+  const sheet = page.getByRole("dialog");
+  await sheet.getByRole("button", { name: "Delete photo" }).click();
+  await sheet.getByTestId("ca-photo-delete-confirm").getByRole("button", { name: "Delete photo" }).click();
+  await expect(page.getByTestId("ca-photo-tile")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: /Photo keep\.jpg/ })).toBeVisible();
+
+  // The server keeps a tombstone (issued reports keep their copy); the app hides it.
+  await expect
+    .poll(async () => {
+      const res = await page.request.get(`/api/ca/projects/${project}/photos`);
+      const { photos } = (await res.json()) as { photos: { fileName: string; deleted?: boolean }[] };
+      return photos.filter((p) => p.deleted).map((p) => p.fileName);
+    })
+    .toEqual(["oops.jpg"]);
+  await page.reload();
+  await expect(page.getByTestId("ca-photo-tile")).toHaveCount(1);
+});

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { openCaDb, resetCaDbForTests } from "@/lib/ca/offline/db";
 import {
   captureFiles,
+  deleteLocalPhoto,
   listLocalPhotos,
   pruneSyncedPhotos,
   retryBlocked,
@@ -28,7 +29,7 @@ function httpError(status: number, message = `HTTP ${status}`) {
 
 /** A fake server that stores photos and pins by id, like the real idempotent PUTs. */
 function fakeServer() {
-  const photos = new Map<string, { caption: string; hasFile: boolean; puts: number; pinId?: string }>();
+  const photos = new Map<string, { caption: string; hasFile: boolean; puts: number; pinId?: string; deleted?: boolean }>();
   const pins = new Map<string, PinBody & { puts: number }>();
   /** Order in which records arrived, e.g. ["pin:capin_…", "photo:caph_…"]. */
   const arrivals: string[] = [];
@@ -52,6 +53,7 @@ function fakeServer() {
     },
     async putPhoto(_project, id, meta, file) {
       const existing = photos.get(id);
+      if (!existing && meta.deleted) return {}; // never stored: nothing to delete (as the real route)
       if (!existing && !file) throw httpError(409, "include the image");
       arrivals.push(`photo:${id}`);
       photos.set(id, {
@@ -59,6 +61,7 @@ function fakeServer() {
         hasFile: Boolean(existing?.hasFile || file),
         puts: (existing?.puts ?? 0) + 1,
         pinId: meta.pinId,
+        deleted: meta.deleted,
       });
       return {};
     },
@@ -293,5 +296,41 @@ describe("housekeeping", () => {
     const in31Days = Date.now() + 31 * 24 * 60 * 60 * 1000;
     expect(await pruneSyncedPhotos(in31Days)).toBe(1);
     expect((await listLocalPhotos(PROJECT)).map((p) => p.fileName)).toEqual(["unsynced.jpg"]);
+  });
+});
+
+describe("deleting photos", () => {
+  it("an uploaded photo deleted offline syncs as a tombstone, then leaves the device", async () => {
+    const server = fakeServer();
+    let online = true;
+    const engine = createSyncEngine({ transport: server.transport, isOnline: () => online });
+    const { saved } = await captureFiles(PROJECT, [jpeg("a.jpg")], { downscale: fakeDownscale });
+    await engine.syncNow();
+
+    online = false;
+    await deleteLocalPhoto(saved[0]);
+    const [local] = await listLocalPhotos(PROJECT);
+    expect(local).toMatchObject({ deleted: true, blob: null, syncState: "pending" });
+    await engine.syncNow();
+    expect(server.photos.get(saved[0])?.deleted).toBeFalsy();
+
+    online = true;
+    const put = vi.spyOn(server.transport, "putPhoto");
+    await engine.syncNow();
+    expect(put.mock.calls[0][2]).toMatchObject({ deleted: true });
+    expect(put.mock.calls[0][3]).toBeUndefined(); // no file sent for a deletion
+    expect(server.photos.get(saved[0])?.deleted).toBe(true);
+    expect(await listLocalPhotos(PROJECT)).toEqual([]);
+    expect(engine.getSnapshot().pending).toBe(0);
+  });
+
+  it("a photo deleted before it ever uploaded never reaches the server", async () => {
+    const server = fakeServer();
+    const engine = createSyncEngine({ transport: server.transport, isOnline: () => true });
+    const { saved } = await captureFiles(PROJECT, [jpeg("a.jpg")], { downscale: fakeDownscale });
+    await deleteLocalPhoto(saved[0]);
+    await engine.syncNow();
+    expect(server.photos.has(saved[0])).toBe(false);
+    expect(await listLocalPhotos(PROJECT)).toEqual([]);
   });
 });

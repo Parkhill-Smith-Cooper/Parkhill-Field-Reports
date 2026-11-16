@@ -58,6 +58,8 @@ describe.each(implementations)("CA repository contract: %s", (_name, make) => {
     expect(list[0]).toMatchObject({ caption: "new", filePath: `${PROJECT}/photos/caph_1.jpg` });
     expect(list[0]).not.toHaveProperty("_etag");
     expect(list[0]).not.toHaveProperty("type");
+    await repo.photos.upsert(photo("caph_1", { deleted: true, clientUpdatedAt: "2026-07-16T00:00:00.000Z" }));
+    expect((await repo.photos.get(PROJECT, "caph_1"))?.deleted).toBe(true);
   });
 
   it("pins: newer edit wins and creation is preserved", async () => {

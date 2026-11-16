@@ -105,6 +105,19 @@ describe("issuing", () => {
     expect((await repo.reports.get(PROJECT, report.id))?.draft.comments).toBe("new");
   });
 
+  it("refuses to issue while the report uses a deleted photo", async () => {
+    const { repo, report } = await setup();
+    await repo.reports.saveDraft(PROJECT, report.id, {
+      ...report.draft,
+      items: [{ id: "caitem_1", status: "complete", description: "", photos: [{ photoId: "caph_1", caption: "" }] }],
+    });
+    await repo.photos.upsert(photo("caph_1", { deleted: true, clientUpdatedAt: "2026-07-20T00:00:00.000Z" }));
+    await expect(issueReport({ repo, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" })).rejects.toMatchObject({
+      name: "CaConflictError",
+      message: expect.stringContaining("deleted"),
+    });
+  });
+
   it("only never-issued reports can be deleted", async () => {
     const { repo, report } = await setup();
     const other = await repo.reports.create(reportInput("carep_2"));

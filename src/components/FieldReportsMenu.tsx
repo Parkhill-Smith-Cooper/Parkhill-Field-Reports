@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Badge,
   Box,
   Button,
   Heading,
@@ -24,9 +23,8 @@ import { CA_HOME, CX_HOME, sectionForPath, type Section } from "@/lib/navigation
  * - The label opens CA Field Reports, the default experience.
  * - The chevron opens a menu to switch between CA Field Reports and CX Field
  *   Reports. The CX app keeps its own URLs (`/projects/...`).
- * - A badge always says which side the engineer is on, so the two never get
- *   confused. On phones the label is hidden for space and the badge becomes
- *   the menu button itself.
+ * - Page eyebrows ("CA Field Reports" / "CX Field Reports") say which side the
+ *   engineer is on. (A red "CA" badge here was removed at the user's request.)
  */
 
 const SECTIONS: { key: Section; label: string; href: string; hint: string }[] = [
@@ -53,8 +51,7 @@ export function FieldReportsMenu() {
           the system font rather than this app's Inter. */}
       <Heading
         asChild
-        hideBelow="sm"
-        size="md"
+        size={{ base: "sm", sm: "md" }}
         fontFamily="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
         whiteSpace="nowrap"
         _hover={{ color: "brand.fg" }}
@@ -68,10 +65,10 @@ export function FieldReportsMenu() {
             variant="ghost"
             size="sm"
             minH="44px"
-            px="2"
+            minW="44px"
+            px="1"
             aria-label={`Switch field reports. Currently ${active === "ca" ? "CA" : "CX"} Field Reports.`}
           >
-            <SectionBadge section={active} />
             <LuChevronDown />
           </Button>
         </Menu.Trigger>
@@ -115,7 +112,6 @@ export function FieldReportsMenu() {
 export function SectionEyebrow({ section }: { section: Section }) {
   return (
     <HStack gap="2" data-print="hide">
-      <SectionBadge section={section} />
       <Text fontSize="sm" color="fg.muted" fontWeight="medium">
         {section === "ca" ? "CA Field Reports" : "CX Field Reports"}
       </Text>
@@ -123,15 +119,3 @@ export function SectionEyebrow({ section }: { section: Section }) {
   );
 }
 
-/** CA is solid brand red; CX is outlined, so the two read differently at a glance. */
-export function SectionBadge({ section }: { section: Section }) {
-  return section === "ca" ? (
-    <Badge colorPalette="brand" variant="solid" size="md" letterSpacing="wide">
-      CA
-    </Badge>
-  ) : (
-    <Badge variant="outline" colorPalette="gray" size="md" letterSpacing="wide">
-      CX
-    </Badge>
-  );
-}

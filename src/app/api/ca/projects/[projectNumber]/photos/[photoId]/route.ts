@@ -16,7 +16,9 @@ import type { CaPhoto } from "@/types/ca";
  *
  * Multipart body:
  * - `meta` (required): JSON with caption, fileName, takenAt, clientUpdatedAt,
- *   optional pinId, width, height.
+ *   optional pinId, width, height, deleted (a tombstone: the record and file
+ *   are kept so the deletion reaches every device and issued reports keep
+ *   their copy).
  * - `file` (required the first time only): the JPEG the browser already
  *   downscaled. Ignored once the photo exists - stored files are immutable.
  *
@@ -52,11 +54,14 @@ export async function PUT(request: Request, { params }: Params) {
     if (problem) return apiError(problem, 400);
     const m = meta as Pick<
       CaPhoto,
-      "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "width" | "height"
+      "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "width" | "height" | "deleted"
     >;
 
     const existing = await repo.photos.get(p.projectNumber, photoId);
     const filePath = caPhotoPath(p.projectNumber, photoId);
+
+    // Deleting a photo the server never received: nothing to store.
+    if (!existing && m.deleted) return Response.json({ photo: null, url: null });
 
     if (!existing) {
       const file = form.get("file");
@@ -83,6 +88,7 @@ export async function PUT(request: Request, { params }: Params) {
       ...(m.pinId ? { pinId: m.pinId } : {}),
       ...(m.width ? { width: m.width } : {}),
       ...(m.height ? { height: m.height } : {}),
+      ...(m.deleted ? { deleted: true } : {}),
       createdBy: existing?.createdBy ?? (await currentUser()),
       createdAt: existing?.createdAt ?? now,
       clientUpdatedAt: m.clientUpdatedAt,

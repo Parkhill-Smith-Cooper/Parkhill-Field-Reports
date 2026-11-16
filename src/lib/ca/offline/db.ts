@@ -34,6 +34,8 @@ export type LocalPhoto = {
   fileName: string;
   caption: string;
   takenAt: string;
+  /** Deleted on this device; the deletion is waiting to sync. */
+  deleted?: boolean;
   pinId?: string;
   width?: number;
   height?: number;

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { LocalPhoto, SyncState } from "@/lib/ca/offline/db";
 import { onCaLocalChange } from "@/lib/ca/offline/events";
-import { listLocalPhotos, updateLocalPhoto } from "@/lib/ca/offline/photoStore";
+import { deleteLocalPhoto, listLocalPhotos, updateLocalPhoto } from "@/lib/ca/offline/photoStore";
 import { fetchCaPhotos, type CaPhotoWithUrl } from "@/services/ca/photoService";
 
 /** One photo as the UI shows it, whether it lives on this device, the server, or both. */
@@ -101,7 +101,12 @@ export function useCaPhotos(projectNumber: string) {
   }, []);
 
   const byId = new Map<string, CaPhotoView>();
+  const deleted = new Set<string>();
   for (const s of server) {
+    if (s.deleted) {
+      deleted.add(s.id);
+      continue;
+    }
     byId.set(s.id, {
       id: s.id,
       src: s.url,
@@ -115,6 +120,11 @@ export function useCaPhotos(projectNumber: string) {
     });
   }
   for (const l of local) {
+    // Deleted here (waiting to sync), or deleted elsewhere and this copy is not newer.
+    if (l.deleted || (deleted.has(l.id) && l.syncState === "synced")) {
+      byId.delete(l.id);
+      continue;
+    }
     const s = byId.get(l.id);
     const serverIsNewer = s && server.find((x) => x.id === l.id)!.clientUpdatedAt > l.clientUpdatedAt && l.syncState === "synced";
     byId.set(l.id, {
@@ -153,5 +163,25 @@ export function useCaPhotos(projectNumber: string) {
     );
   }
 
-  return { photos, loaded, serverReachable, editPhoto, refresh: readServer };
+  /** Delete a photo from the project (on the device first; it syncs on its own). */
+  async function deletePhoto(id: string) {
+    const s = server.find((x) => x.id === id);
+    await deleteLocalPhoto(
+      id,
+      s && {
+        id: s.id,
+        projectNumber,
+        blob: null,
+        fileName: s.fileName,
+        takenAt: s.takenAt,
+        pinId: s.pinId,
+        width: s.width,
+        height: s.height,
+        createdAt: s.createdAt,
+        uploaded: true,
+      },
+    );
+  }
+
+  return { photos, loaded, serverReachable, editPhoto, deletePhoto, refresh: readServer };
 }
