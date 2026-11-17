@@ -1,11 +1,13 @@
-import { Box, Flex, Heading, HStack } from "@chakra-ui/react";
+import { Box, Flex, HStack } from "@chakra-ui/react";
 import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
 
+import { FieldReportsMenu } from "@/components/FieldReportsMenu";
 import { UserMenu } from "@/components/UserMenu";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth/session";
 import { APP_NAME, LOGO_SRC } from "@/lib/branding";
+import { CA_HOME } from "@/lib/navigation";
 
 /**
  * Application header.
@@ -44,7 +46,7 @@ export async function AppHeader() {
         gap="4"
       >
         <HStack gap={{ base: 2, md: 3 }} minW="0">
-          <Link href="/projects" aria-label={`${APP_NAME} home`}>
+          <Link href={CA_HOME} aria-label={`${APP_NAME} home`}>
             <Box w={{ base: "120px", md: "130px" }} p={{ base: 2, md: 4 }}>
               <Image
                 src={LOGO_SRC}
@@ -58,19 +60,9 @@ export async function AppHeader() {
           </Link>
 
           {/* The hub's logo carries its product name ("+ Tech"); this app's
-              logo doesn't, so the name sits beside it. Hidden on phones,
-              where the logo alone is enough. */}
-          {/* Matches the app title in the Construction Administration app
-              (parkhill-ccr): a md heading in the system font (Segoe UI on
-              Windows) rather than this app's Inter. */}
-          <Heading
-            hideBelow="sm"
-            size="md"
-            fontFamily="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
-            whiteSpace="nowrap"
-          >
-            {APP_NAME}
-          </Heading>
+              logo doesn't, so the name sits beside it - as the "Field
+              Reports ⌄" switcher between CA and CX (CA_plan.pdf p.1). */}
+          <FieldReportsMenu />
         </HStack>
 
         {session && (

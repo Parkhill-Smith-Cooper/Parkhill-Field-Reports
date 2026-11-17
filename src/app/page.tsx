@@ -88,8 +88,8 @@ export default async function SignInPage({
               {APP_NAME}
             </Text>
             <Text fontSize="sm" color="fg.muted">
-              Record a field observation, work through recommended diagnostic checks and
-              corrective actions, and produce a commissioning field report.
+              Record construction administration and commissioning field
+              observations on site, and produce Parkhill field reports.
             </Text>
           </Stack>
         </Stack>

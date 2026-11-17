@@ -2,6 +2,8 @@ import "server-only";
 
 import { SignJWT, jwtVerify } from "jose";
 
+import { DEFAULT_LANDING } from "@/lib/navigation";
+
 /**
  * RelayState: the login request's proof of origin.
  *
@@ -57,7 +59,7 @@ export async function unpackRelayState(
     return {
       rid: payload.rid,
       returnTo:
-        typeof payload.returnTo === "string" ? payload.returnTo : "/projects",
+        typeof payload.returnTo === "string" ? payload.returnTo : DEFAULT_LANDING,
     };
   } catch {
     return null;
@@ -69,7 +71,7 @@ export async function unpackRelayState(
  * crafted link cannot use the sign-in flow to bounce someone to another site.
  */
 export function safeReturnTo(candidate: string | null | undefined): string {
-  if (!candidate) return "/projects";
-  if (!candidate.startsWith("/") || candidate.startsWith("//")) return "/projects";
+  if (!candidate) return DEFAULT_LANDING;
+  if (!candidate.startsWith("/") || candidate.startsWith("//")) return DEFAULT_LANDING;
   return candidate;
 }

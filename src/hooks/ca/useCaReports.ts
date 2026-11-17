@@ -1,0 +1,186 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { newCaReportId } from "@/lib/ca/ids";
+import type { LocalDraft, SyncState } from "@/lib/ca/offline/db";
+import { getLocalDraft, listLocalDrafts, saveLocalDraft } from "@/lib/ca/offline/draftStore";
+import { onCaLocalChange } from "@/lib/ca/offline/events";
+import { reportState } from "@/lib/ca/reportContent";
+import { fetchCaReport, fetchCaReports } from "@/services/ca/reportService";
+import type { CaReport, CaReportContent, CaReportState, CaRevisionSummary } from "@/types/ca";
+
+export type CaReportListItem = {
+  id: string;
+  /** Assigned by the server; null until the report first syncs. */
+  reportNumber: string | null;
+  content: CaReportContent;
+  state: CaReportState;
+  latestRevision: number | null;
+  syncState: SyncState;
+  updatedAt: string;
+};
+
+/** The device copy wins while it has unsynced edits, or when it is at least as new. */
+function preferLocal(local: LocalDraft | undefined, server: CaReport | undefined): boolean {
+  if (!local) return false;
+  if (!server) return true;
+  return local.syncState !== "synced" || local.clientUpdatedAt >= server.draftUpdatedAt;
+}
+
+/** Starts a report on this device (works offline) and returns its id. */
+export async function startCaReport(projectNumber: string, content: CaReportContent): Promise<string> {
+  const id = newCaReportId();
+  await saveLocalDraft({ id, projectNumber, content, createdAt: new Date().toISOString() });
+  return id;
+}
+
+/** The project's reports: the server's list plus drafts that so far exist only on this device. */
+export function useCaReports(projectNumber: string) {
+  const [server, setServer] = useState<CaReport[]>([]);
+  const [local, setLocal] = useState<LocalDraft[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [serverReachable, setServerReachable] = useState(true);
+
+  const readLocal = useCallback(() => listLocalDrafts(projectNumber).then(setLocal), [projectNumber]);
+  const readServer = useCallback(
+    () =>
+      fetchCaReports(projectNumber).then(
+        (list) => {
+          setServer(list);
+          setServerReachable(true);
+          setLoaded(true);
+        },
+        () => {
+          setServerReachable(false);
+          setLoaded(true);
+        },
+      ),
+    [projectNumber],
+  );
+
+  useEffect(() => {
+    void readLocal();
+    void readServer();
+    return onCaLocalChange((project, origin) => {
+      if (project !== null && project !== projectNumber) return;
+      void readLocal();
+      if (origin === "sync") void readServer();
+    });
+  }, [projectNumber, readLocal, readServer]);
+
+  const localById = new Map(local.map((d) => [d.id, d]));
+  const items: CaReportListItem[] = server.map((r) => {
+    const l = localById.get(r.id);
+    const takeLocal = preferLocal(l, r);
+    return {
+      id: r.id,
+      reportNumber: r.reportNumber,
+      content: takeLocal ? l!.content : r.draft,
+      state: takeLocal && l!.syncState !== "synced" && r.latestRevision !== null ? "revising" : reportState(r),
+      latestRevision: r.latestRevision,
+      syncState: l && l.syncState !== "synced" ? l.syncState : "synced",
+      updatedAt: takeLocal ? l!.clientUpdatedAt : r.updatedAt,
+    };
+  });
+  const onServer = new Set(server.map((r) => r.id));
+  for (const l of local) {
+    if (onServer.has(l.id)) continue;
+    // A synced draft missing from a successful server list was deleted elsewhere.
+    if (l.syncState === "synced" && serverReachable) continue;
+    items.push({
+      id: l.id,
+      reportNumber: null,
+      content: l.content,
+      state: "draft",
+      latestRevision: null,
+      syncState: l.syncState,
+      updatedAt: l.clientUpdatedAt,
+    });
+  }
+  items.sort(
+    (a, b) =>
+      (b.reportNumber ?? "999999").localeCompare(a.reportNumber ?? "999999") || b.updatedAt.localeCompare(a.updatedAt),
+  );
+
+  return { reports: items, loaded, serverReachable, refresh: readServer };
+}
+
+/**
+ * One report for the editor: the draft shown (device copy or server copy,
+ * whichever is current), its version stamp for Issue, and its revisions.
+ */
+export function useCaReport(projectNumber: string, reportId: string) {
+  const [local, setLocal] = useState<LocalDraft | undefined>();
+  const [localRead, setLocalRead] = useState(false);
+  const [server, setServer] = useState<{ report: CaReport; revisions: CaRevisionSummary[] } | null>(null);
+  const [serverState, setServerState] = useState<"loading" | "ok" | "missing" | "offline">("loading");
+  // Set from callbacks (never during render); used when saving the first local copy.
+  const serverCreatedAt = useRef<string | null>(null);
+
+  const readLocal = useCallback(
+    () =>
+      getLocalDraft(reportId).then((d) => {
+        setLocal(d);
+        setLocalRead(true);
+      }),
+    [reportId],
+  );
+  const readServer = useCallback(
+    () =>
+      fetchCaReport(projectNumber, reportId).then(
+        (result) => {
+          serverCreatedAt.current = result.report.createdAt;
+          setServer(result);
+          setServerState("ok");
+        },
+        (error: { status?: number }) => setServerState(error?.status === 404 ? "missing" : "offline"),
+      ),
+    [projectNumber, reportId],
+  );
+
+  useEffect(() => {
+    void readLocal();
+    void readServer();
+    return onCaLocalChange((project, origin) => {
+      if (project !== null && project !== projectNumber) return;
+      void readLocal();
+      if (origin === "sync") void readServer();
+    });
+  }, [projectNumber, readLocal, readServer]);
+
+  const takeLocal = preferLocal(local, server?.report);
+  const content = takeLocal ? local!.content : (server?.report.draft ?? null);
+  /** The version stamp of the draft shown; Issue sends it so only this version can be issued. */
+  const version = takeLocal ? local!.clientUpdatedAt : (server?.report.draftUpdatedAt ?? null);
+  const loaded = localRead && (serverState !== "loading" || Boolean(local));
+
+  /** Saves an edit on the device and queues it for sync. */
+  const save = useCallback(
+    async (next: CaReportContent) => {
+      const existing = await getLocalDraft(reportId);
+      const saved = await saveLocalDraft({
+        id: reportId,
+        projectNumber,
+        content: next,
+        createdAt: existing?.createdAt ?? serverCreatedAt.current ?? new Date().toISOString(),
+      });
+      setLocal(saved);
+    },
+    [projectNumber, reportId],
+  );
+
+  return {
+    loaded,
+    /** "missing": not on the server and not on this device. */
+    notFound: localRead && !local && serverState === "missing",
+    content,
+    version,
+    report: server?.report ?? null,
+    revisions: server?.revisions ?? [],
+    syncState: local?.syncState ?? (server ? "synced" : "pending"),
+    serverReachable: serverState !== "offline",
+    save,
+    refresh: readServer,
+  };
+}

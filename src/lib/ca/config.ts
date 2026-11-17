@@ -1,0 +1,119 @@
+import "server-only";
+
+/**
+ * CA Field Reports configuration.
+ *
+ * Kept apart from `src/lib/env.ts` (the CX configuration) so CA settings can
+ * evolve without touching CX. Same pattern: read lazily, validated on first
+ * use, and a bad value produces a sentence naming the variable.
+ *
+ * Mode switches:
+ *
+ * | Variable            | Values                        | Default                                  |
+ * | ------------------- | ----------------------------- | ---------------------------------------- |
+ * | `CA_DATA_MODE`      | `mock` · `azure`              | `mock` in development; REQUIRED in production |
+ * | `CA_PROJECT_SOURCE` | `mock` · `vantagepoint` · `ca-app` · `none` | `mock` in mock mode, else `none` |
+ * | `CA_DRAWING_SOURCE` | `mock` · `ca-app` · `none`    | `mock` in mock mode, else `none`         |
+ *
+ * `azure` mode never falls back to mock data. If Azure is misconfigured the
+ * request fails with a message naming the missing variable, exactly as CX
+ * does - a silent fallback would let someone file a real report into a
+ * throwaway store.
+ */
+
+export type CaDataMode = "mock" | "azure";
+export type CaProjectSourceMode = "mock" | "vantagepoint" | "ca-app" | "none";
+export type CaDrawingSourceMode = "mock" | "ca-app" | "none";
+
+function readEnum<T extends string>(
+  name: string,
+  allowed: readonly T[],
+  fallback: () => T,
+): T {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback();
+  if ((allowed as readonly string[]).includes(raw)) return raw as T;
+  throw new Error(
+    `Invalid ${name}=${JSON.stringify(raw)}. Expected one of: ${allowed.join(", ")}. ` +
+      `See the "CA Field Reports" section of the README.`,
+  );
+}
+
+function required(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(
+      `Missing required environment variable ${name}. ` +
+        `See the "CA Field Reports" section of the README.`,
+    );
+  }
+  return value;
+}
+
+function optional(name: string, fallback: string): string {
+  return process.env[name]?.trim() || fallback;
+}
+
+export const caConfig = {
+  get dataMode(): CaDataMode {
+    return readEnum<CaDataMode>("CA_DATA_MODE", ["mock", "azure"], () => {
+      if (process.env.NODE_ENV === "production") {
+        // Fail closed: production must say which store it means.
+        throw new Error(
+          "Missing required environment variable CA_DATA_MODE. Set it to " +
+            '"azure" (or "mock" for a demo deployment). See the "CA Field ' +
+            'Reports" section of the README.',
+        );
+      }
+      return "mock";
+    });
+  },
+
+  get projectSource(): CaProjectSourceMode {
+    return readEnum<CaProjectSourceMode>(
+      "CA_PROJECT_SOURCE",
+      ["mock", "vantagepoint", "ca-app", "none"],
+      () => (this.dataMode === "mock" ? "mock" : "none"),
+    );
+  },
+
+  get drawingSource(): CaDrawingSourceMode {
+    return readEnum<CaDrawingSourceMode>(
+      "CA_DRAWING_SOURCE",
+      ["mock", "ca-app", "none"],
+      () => (this.dataMode === "mock" ? "mock" : "none"),
+    );
+  },
+
+  /** Base URL of the CA application's API. Not yet known - see the README. */
+  get caAppApiBaseUrl(): string {
+    return required("CA_APP_API_BASE_URL");
+  },
+
+  /** Entra scope for app-to-app calls to the CA application. Not yet known. */
+  get caAppApiScope(): string {
+    return required("CA_APP_API_SCOPE");
+  },
+
+  get cosmosProjectsContainer(): string {
+    return optional("COSMOS_CA_PROJECTS_CONTAINER", "caProjects");
+  },
+  get cosmosReportsContainer(): string {
+    return optional("COSMOS_CA_REPORTS_CONTAINER", "caReports");
+  },
+  get cosmosDrawingsContainer(): string {
+    return optional("COSMOS_CA_DRAWINGS_CONTAINER", "caDrawings");
+  },
+  /** Photos and pins (the capture records). */
+  get cosmosCaptureContainer(): string {
+    return optional("COSMOS_CA_CAPTURE_CONTAINER", "caCapture");
+  },
+  get storageContainer(): string {
+    return optional("AZURE_STORAGE_CA_CONTAINER", "ca-files");
+  },
+
+  /** Where mock mode keeps its data between dev-server restarts. Git-ignored. */
+  get mockDataDir(): string {
+    return optional("CA_MOCK_DATA_DIR", ".ca-dev-data");
+  },
+};

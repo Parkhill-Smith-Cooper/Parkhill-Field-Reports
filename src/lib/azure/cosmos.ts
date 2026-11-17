@@ -42,6 +42,15 @@ export function observationsContainer(): Container {
     .container(env.cosmosObservationsContainer);
 }
 
+/**
+ * A container in the app's database, for CA Field Reports (its containers
+ * are named in src/lib/ca/config.ts). Shares the client, and so the
+ * connection pool, with the CX containers above.
+ */
+export function databaseContainer(name: string): Container {
+  return client().database(env.cosmosDatabase).container(name);
+}
+
 /** Cosmos surfaces "already exists" and "not found" as HTTP codes on the error. */
 export function cosmosStatus(error: unknown): number | undefined {
   if (typeof error === "object" && error !== null && "code" in error) {

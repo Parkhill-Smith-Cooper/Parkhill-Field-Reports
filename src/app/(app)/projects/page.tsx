@@ -21,6 +21,7 @@ import {
 } from "react-icons/lu";
 
 import { EmptyState } from "@/components/EmptyState";
+import { SectionEyebrow } from "@/components/FieldReportsMenu";
 import { NewProjectDialog } from "@/components/NewProjectDialog";
 import { PageShell } from "@/components/PageShell";
 import { ProjectActions } from "@/components/ProjectActions";
@@ -77,6 +78,7 @@ export default function ProjectsPage() {
 
   return (
     <PageShell
+      eyebrow={<SectionEyebrow section="cx" />}
       title="Projects"
       description="Select a project to record a commissioning field observation."
       width="5xl"

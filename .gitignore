@@ -41,3 +41,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# CA Field Reports mock-mode data (local only, never real records)
+/.ca-dev-data/
+
+# playwright
+/playwright-report/
+/test-results/
+/blob-report/
+/playwright/.cache/

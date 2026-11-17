@@ -83,6 +83,23 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** Multipart PUT, for idempotent uploads keyed by a client-generated id (CA). */
+export async function apiPutForm<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(path, { method: "PUT", body: form });
+  if (!response.ok) throw await toError(response);
+  return (await response.json()) as T;
+}
+
+/**
+ * Downloads a file as a Blob (CA: drawing sheets cached for offline use).
+ * `url` may be a same-origin route or a short-lived Blob SAS URL.
+ */
+export async function apiGetBlob(url: string): Promise<Blob> {
+  const response = await fetch(url, { cache: "no-store" });
+  if (!response.ok) throw await toError(response);
+  return response.blob();
+}
+
 export async function apiPostForm<T>(
   path: string,
   form: FormData,
