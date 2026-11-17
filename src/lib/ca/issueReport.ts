@@ -15,6 +15,15 @@ import { buildRevision } from "./revisions";
  * retrying finds the revision already there and, when it is the same content,
  * simply completes the mark. That makes "Issue" safe to retry without ever
  * creating a second, different Rev N.
+ *
+ * If the revision already there has DIFFERENT content (the draft was edited
+ * between a failed mark and the retry, or another device issued first), that
+ * revision is immutable and stays Rev N: the report's pointer is moved to it,
+ * the newer draft is kept as "changes not issued", and the engineer is asked
+ * to review and issue it as Rev N+1. The report is never left stuck.
+ *
+ * The mark carries the draft version the revision froze, so edits saved on
+ * another device while issuing was in flight stay "changes not issued".
  */
 export async function issueReport(input: {
   repo: CaRepository;
@@ -77,9 +86,18 @@ export async function issueReport(input: {
       reportId,
       candidate.revision,
     );
-    // Same content: a retried issue whose mark step failed. Finish it.
-    // Different content: someone else issued first. Refuse; never overwrite.
-    if (!existing || existing.contentHash !== candidate.contentHash) throw error;
+    if (!existing) throw error;
+    if (existing.contentHash !== candidate.contentHash) {
+      // Rev N was issued with other content and is immutable. Point the
+      // report at it (the draft stays "changes not issued" because it is not
+      // the version Rev N froze), so the next Issue creates Rev N+1.
+      await repo.reports.markIssued(projectNumber, reportId, existing.revision, existing.draftUpdatedAt);
+      throw new CaConflictError(
+        `Rev ${existing.revision} was already issued from an earlier version of this report. Your newer changes are kept; review them, then issue Rev ${existing.revision + 1}.`,
+      );
+    }
+    // Same content: a retried issue whose mark step failed. Finish it,
+    // against the draft version this attempt froze.
     revision = existing;
   }
 
@@ -87,6 +105,7 @@ export async function issueReport(input: {
     projectNumber,
     reportId,
     revision.revision,
+    candidate.draftUpdatedAt,
   );
   return marked ? { report: marked, revision } : null;
 }

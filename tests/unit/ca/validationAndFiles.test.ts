@@ -87,6 +87,16 @@ describe("CA file paths and the mock file store", () => {
     expect(isPathInProject(`OTHER/photos/x.jpg`, PROJECT)).toBe(false);
   });
 
+  it("stores immutably in memory, even for concurrent first uploads", async () => {
+    const store = createMockFileStore({ dataDir: null });
+    const p = caPhotoPath(PROJECT, "caph_1");
+    await Promise.all([
+      store.put(p, new Uint8Array([1]), "image/jpeg"),
+      store.put(p, new Uint8Array([2]), "image/png"),
+    ]);
+    expect(await store.get(p)).toEqual({ bytes: new Uint8Array([1]), contentType: "image/jpeg" });
+  });
+
   it("stores immutably on disk and refuses unsafe paths", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ca-files-"));
     try {
@@ -98,6 +108,18 @@ describe("CA file paths and the mock file store", () => {
       expect(Array.from(got!.bytes)).toEqual([1, 2, 3]);
       expect(got!.contentType).toBe("image/jpeg");
       await expect(store.put("../evil", new Uint8Array([1]), "x")).rejects.toThrow();
+
+      // Concurrent first uploads of one path: exactly one wins, whole.
+      const q = caPhotoPath(PROJECT, "caph_2");
+      await Promise.all(
+        Array.from({ length: 8 }, (_, i) => store.put(q, new Uint8Array(4096).fill(i + 1), `image/t${i + 1}`)),
+      );
+      const raced = await store.get(q);
+      const winner = raced!.bytes[0];
+      expect(raced!.bytes.every((b) => b === winner)).toBe(true);
+      expect(raced!.contentType).toBe(`image/t${winner}`);
+      const folder = path.dirname(path.join(dir, "files", ...q.split("/")));
+      expect(fs.readdirSync(folder).some((f) => f.endsWith(".tmp"))).toBe(false);
       expect(await store.readUrl(p)).toBe(
         `/api/ca/files/${encodeURIComponent(PROJECT)}/photos/caph_1.jpg`,
       );

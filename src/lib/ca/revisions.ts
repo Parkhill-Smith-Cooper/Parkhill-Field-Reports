@@ -43,6 +43,28 @@ export function nextRevisionNumber(latest: number | null): number {
   return latest === null ? 0 : latest + 1;
 }
 
+/**
+ * The report after recording `revision` as issued, or `null` when the mark
+ * would change nothing (a stale or repeated mark). Shared by every
+ * repository so the rule is applied inside each one's atomic update:
+ * - `latestRevision` never moves backwards;
+ * - the draft stays "changes not issued" unless it is still exactly the
+ *   version the revision froze. A missing `issuedDraftUpdatedAt` (an older
+ *   revision) is treated as "cannot prove it matches", so stays dirty.
+ */
+export function applyIssueMark(
+  report: CaReport,
+  revision: number,
+  issuedDraftUpdatedAt: string | undefined,
+  updatedAt: string,
+): CaReport | null {
+  if (report.latestRevision !== null && revision < report.latestRevision) return null;
+  const hasUnissuedChanges =
+    issuedDraftUpdatedAt === undefined || report.draftUpdatedAt !== issuedDraftUpdatedAt;
+  if (report.latestRevision === revision && report.hasUnissuedChanges === hasUnissuedChanges) return null;
+  return { ...report, latestRevision: revision, hasUnissuedChanges, updatedAt };
+}
+
 export function revisionId(reportId: string, revision: number): string {
   return `${reportId}_r${revision}`;
 }
@@ -80,6 +102,7 @@ export function buildRevision(input: {
     content,
     photoPaths: frozenPaths,
     contentHash: contentHash({ content, photoPaths: frozenPaths }),
+    draftUpdatedAt: report.draftUpdatedAt,
   };
 }
 

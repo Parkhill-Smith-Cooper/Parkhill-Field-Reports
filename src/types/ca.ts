@@ -259,6 +259,12 @@ export type CaReportRevision = {
   /** photoId → file path, frozen at issue time. */
   photoPaths: Record<string, string>;
   contentHash: string;
+  /**
+   * The `draftUpdatedAt` of the draft this revision froze. Lets marking tell
+   * whether the stored draft has moved on since (edits made after the issue
+   * was started stay "changes not issued"). Absent on older revisions.
+   */
+  draftUpdatedAt?: string;
 };
 
 export type CaRevisionSummary = Pick<

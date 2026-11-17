@@ -8,7 +8,7 @@ import {
   type CaRepository,
 } from "@/lib/ca/contracts";
 import { formatReportNumber } from "@/lib/ca/reportContent";
-import { RevisionAlreadyExistsError } from "@/lib/ca/revisions";
+import { applyIssueMark, RevisionAlreadyExistsError } from "@/lib/ca/revisions";
 import type {
   CaDrawing,
   CaPhoto,
@@ -277,15 +277,11 @@ export function createMockCaRepository(options: {
         persist();
         return clone(revision);
       },
-      async markIssued(projectNumber, reportId, revision) {
+      async markIssued(projectNumber, reportId, revision, issuedDraftUpdatedAt) {
         const existing = db.reports[projectNumber]?.[reportId];
         if (!existing) return null;
-        const updated: CaReport = {
-          ...existing,
-          latestRevision: revision,
-          hasUnissuedChanges: false,
-          updatedAt: now(),
-        };
+        const updated = applyIssueMark(existing, revision, issuedDraftUpdatedAt, now());
+        if (!updated) return clone(existing);
         db.reports[projectNumber][reportId] = updated;
         persist();
         return clone(updated);

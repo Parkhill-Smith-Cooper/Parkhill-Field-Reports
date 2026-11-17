@@ -12,7 +12,7 @@ import {
   retryBlocked,
   updateLocalPhoto,
 } from "@/lib/ca/offline/photoStore";
-import { createPin, listLocalPins, updatePin } from "@/lib/ca/offline/pinStore";
+import { createPin, listLocalPins, mirrorServerPins, updatePin } from "@/lib/ca/offline/pinStore";
 import { backoffMs, createSyncEngine, type SyncTransport } from "@/lib/ca/offline/syncEngine";
 import type { PinBody } from "@/services/ca/pinService";
 import type { ReportPutBody } from "@/services/ca/reportService";
@@ -277,6 +277,48 @@ describe("pins", () => {
     online = true;
     await engine.syncNow();
     expect(server.pins.get(pin.id)).toMatchObject({ label: "Mech room", deleted: true, puts: 1 });
+  });
+
+  it("edits start from the newer server copy when this device has nothing unsynced", async () => {
+    const pin = await createPin(PROJECT, { drawingId: "cadwg_1", x: 0.1, y: 0.1, note: "old note" });
+    const db = await openCaDb();
+    await db.put("pins", { ...pin, syncState: "synced" });
+    await db.clear("outbox");
+    // Another device moved it and changed the note.
+    const later = new Date(Date.parse(pin.clientUpdatedAt) + 60_000).toISOString();
+    const serverCopy = { ...pin, x: 0.6, note: "new note", clientUpdatedAt: later };
+
+    const edited = await updatePin(pin.id, { label: "Mech room" }, serverCopy);
+    expect(edited).toMatchObject({ label: "Mech room", note: "new note", x: 0.6, syncState: "pending" });
+    expect(edited.clientUpdatedAt > later).toBe(true);
+  });
+
+  it("an unsynced device edit is never replaced by the server copy", async () => {
+    const pin = await createPin(PROJECT, { drawingId: "cadwg_1", x: 0.1, y: 0.1, note: "mine" });
+    const later = new Date(Date.parse(pin.clientUpdatedAt) + 60_000).toISOString();
+    const edited = await updatePin(pin.id, { label: "L" }, { ...pin, note: "theirs", clientUpdatedAt: later });
+    expect(edited.note).toBe("mine");
+  });
+
+  it("mirrors server pins to the device without queuing them", async () => {
+    const mine = await createPin(PROJECT, { drawingId: "cadwg_1", x: 0.1, y: 0.1, note: "unsynced" });
+    const later = new Date(Date.parse(mine.clientUpdatedAt) + 60_000).toISOString();
+    const fromOtherDevice = { id: "capin_other", projectNumber: PROJECT, drawingId: "cadwg_1", x: 0.5, y: 0.5, label: "", note: "", createdAt: later, clientUpdatedAt: later };
+
+    const changed = await mirrorServerPins(PROJECT, [fromOtherDevice, { ...mine, note: "server", clientUpdatedAt: later }]);
+    expect(changed).toBe(1);
+
+    const local = await listLocalPins(PROJECT);
+    expect(local.find((p) => p.id === "capin_other")).toMatchObject({ syncState: "synced" });
+    expect(local.find((p) => p.id === mine.id)).toMatchObject({ note: "unsynced", syncState: "pending" });
+    // Only this device's own pin is waiting to upload.
+    expect(await (await openCaDb()).count("outbox")).toBe(1);
+
+    // A newer server edit or deletion replaces a synced device copy.
+    const tombstone = { ...fromOtherDevice, deleted: true, clientUpdatedAt: new Date(Date.parse(later) + 1000).toISOString() };
+    expect(await mirrorServerPins(PROJECT, [tombstone])).toBe(1);
+    expect((await listLocalPins(PROJECT)).find((p) => p.id === "capin_other")?.deleted).toBe(true);
+    expect(await mirrorServerPins(PROJECT, [tombstone])).toBe(0);
   });
 
   it("clamps pins to the sheet", async () => {

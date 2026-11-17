@@ -211,6 +211,72 @@ describe("mock CA repository: reports and revisions", () => {
     expect(retry?.revision.revision).toBe(0);
     expect(await r.reports.listRevisions(PROJECT, report.id)).toHaveLength(1);
   });
+
+  it("recovers when the mark failed and the draft was edited before the retry", async () => {
+    const r = repo();
+    const report = await r.reports.create(reportInput());
+    await r.reports.saveDraft(PROJECT, report.id, { ...report.draft, workSummary: "Issued text" }, "2026-11-12T14:00:00.000Z");
+    const realMark = r.reports.markIssued;
+    r.reports.markIssued = async () => {
+      throw new Error("network");
+    };
+    await expect(
+      issueReport({ repo: r, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" }),
+    ).rejects.toThrow("network");
+    r.reports.markIssued = realMark;
+
+    // Edited before retrying: Rev 0 holds the older text and is immutable.
+    await r.reports.saveDraft(PROJECT, report.id, { ...report.draft, workSummary: "Newer text" }, "2026-11-12T15:00:00.000Z");
+    await expect(
+      issueReport({ repo: r, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" }),
+    ).rejects.toMatchObject({ name: "CaConflictError" });
+
+    const reconciled = await r.reports.get(PROJECT, report.id);
+    expect(reconciled?.latestRevision).toBe(0);
+    expect(reconciled?.hasUnissuedChanges).toBe(true);
+
+    // Not stuck: the newer edits issue as Rev 1, and Rev 0 is untouched.
+    const next = await issueReport({ repo: r, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" });
+    expect(next?.revision.revision).toBe(1);
+    expect(next?.revision.content.workSummary).toBe("Newer text");
+    expect(next?.report.hasUnissuedChanges).toBe(false);
+    expect((await r.reports.getRevision(PROJECT, report.id, 0))?.content.workSummary).toBe("Issued text");
+  });
+
+  it("keeps edits saved while issuing was in flight as not issued", async () => {
+    const r = repo();
+    const report = await r.reports.create(reportInput());
+    await r.reports.saveDraft(PROJECT, report.id, { ...report.draft, workSummary: "Reviewed" }, "2026-11-12T14:00:00.000Z");
+    // Another device saves between the version check and the mark.
+    const realCreate = r.reports.createRevision;
+    r.reports.createRevision = async (rev) => {
+      const created = await realCreate(rev);
+      await r.reports.saveDraft(PROJECT, report.id, { ...report.draft, workSummary: "Edited elsewhere" }, "2026-11-12T15:00:00.000Z");
+      return created;
+    };
+    const done = await issueReport({ repo: r, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" });
+    r.reports.createRevision = realCreate;
+
+    expect(done?.revision.content.workSummary).toBe("Reviewed");
+    expect(done?.report.latestRevision).toBe(0);
+    expect(done?.report.hasUnissuedChanges).toBe(true);
+
+    // Issuing again freezes the newer edits as Rev 1 instead of returning Rev 0.
+    const again = await issueReport({ repo: r, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" });
+    expect(again?.revision.revision).toBe(1);
+    expect(again?.revision.content.workSummary).toBe("Edited elsewhere");
+  });
+
+  it("a late mark never moves the latest revision backwards", async () => {
+    const r = repo();
+    const report = await r.reports.create(reportInput());
+    await issueReport({ repo: r, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" });
+    await r.reports.saveDraft(PROJECT, report.id, { ...report.draft, workSummary: "v2" });
+    await issueReport({ repo: r, projectNumber: PROJECT, reportId: report.id, issuedBy: "a" });
+    const stale = await r.reports.markIssued(PROJECT, report.id, 0, undefined);
+    expect(stale?.latestRevision).toBe(1);
+    expect(stale?.hasUnissuedChanges).toBe(false);
+  });
 });
 
 describe("mock CA repository: persistence", () => {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { LocalPin, SyncState } from "@/lib/ca/offline/db";
 import { onCaLocalChange } from "@/lib/ca/offline/events";
-import { createPin, listLocalPins, updatePin } from "@/lib/ca/offline/pinStore";
+import { createPin, listLocalPins, mirrorServerPins, updatePin } from "@/lib/ca/offline/pinStore";
 import { fetchCaPins } from "@/services/ca/pinService";
 import type { CaPin } from "@/types/ca";
 
@@ -33,8 +33,29 @@ export function useCaPins(projectNumber: string) {
     [projectNumber],
   );
   const readServer = useCallback(
-    () => fetchCaPins(projectNumber).then(setServer, () => undefined),
-    [projectNumber],
+    () =>
+      fetchCaPins(projectNumber).then(
+        async (fetched) => {
+          setServer(fetched);
+          // Keep the server's pins on the device, so pins from other devices
+          // (and their newer edits and deletions) survive an offline reload.
+          // Not queued for upload; unsynced local edits are left alone.
+          try {
+            const changed = await mirrorServerPins(
+              projectNumber,
+              fetched.map(({ createdBy: _createdBy, ...rest }) => {
+                void _createdBy;
+                return rest;
+              }),
+            );
+            if (changed > 0) await readLocal();
+          } catch {
+            // Storage unavailable: the in-memory merge below still shows them.
+          }
+        },
+        () => undefined,
+      ),
+    [projectNumber, readLocal],
   );
 
   useEffect(() => {

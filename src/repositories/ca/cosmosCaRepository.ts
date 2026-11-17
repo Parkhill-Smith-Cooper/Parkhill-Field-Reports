@@ -2,7 +2,7 @@ import "server-only";
 
 import { CaConflictError, type CaRepository } from "@/lib/ca/contracts";
 import { formatReportNumber } from "@/lib/ca/reportContent";
-import { RevisionAlreadyExistsError } from "@/lib/ca/revisions";
+import { applyIssueMark, RevisionAlreadyExistsError } from "@/lib/ca/revisions";
 import type {
   CaDrawing,
   CaPhoto,
@@ -387,13 +387,12 @@ export function createCosmosCaRepository(containers: CaCosmosContainers): CaRepo
           throw error;
         }
       },
-      async markIssued(projectNumber, reportId, revision) {
-        return update<CaReport>(reports, reportId, projectNumber, (r) => ({
-          ...r,
-          latestRevision: revision,
-          hasUnissuedChanges: false,
-          updatedAt: now(),
-        }));
+      async markIssued(projectNumber, reportId, revision, issuedDraftUpdatedAt) {
+        // Inside the etag-guarded update: a draft saved concurrently forces a
+        // retry, and the dirty flag is recomputed against that newer draft.
+        return update<CaReport>(reports, reportId, projectNumber, (r) =>
+          applyIssueMark(r, revision, issuedDraftUpdatedAt, now()),
+        );
       },
       async listRevisions(projectNumber, reportId) {
         return (await listByType<CaReportRevision>(reports, projectNumber, "revision"))

@@ -101,11 +101,18 @@ export interface CaReportStore {
    * already exists. Never updates or deletes an existing revision.
    */
   createRevision(revision: CaReportRevision): Promise<CaReportRevision>;
-  /** Records that `revision` is now the latest issued version. */
+  /**
+   * Records that `revision` is now the latest issued version, atomically:
+   * - `latestRevision` never moves backwards (a late, stale mark is ignored);
+   * - `hasUnissuedChanges` stays true when the stored draft is no longer the
+   *   version the revision froze (`issuedDraftUpdatedAt`), so edits saved
+   *   while the issue was in flight are not mistaken for issued ones.
+   */
   markIssued(
     projectNumber: string,
     reportId: string,
     revision: number,
+    issuedDraftUpdatedAt: string | undefined,
   ): Promise<CaReport | null>;
   listRevisions(
     projectNumber: string,

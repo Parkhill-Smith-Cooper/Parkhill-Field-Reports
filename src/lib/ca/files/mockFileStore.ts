@@ -1,5 +1,6 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -47,6 +48,15 @@ export function createMockFileStore(options: {
     }
   }
 
+  async function fileExists(full: string): Promise<boolean> {
+    try {
+      await fs.access(full);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   return {
     kind: "mock",
 
@@ -54,17 +64,42 @@ export function createMockFileStore(options: {
       if (!isSafeFilePath(filePath)) {
         throw new Error(`Refusing unsafe file path ${JSON.stringify(filePath)}.`);
       }
-      // Immutable, like the Azure store: a retried upload of the same file
-      // is a no-op rather than an overwrite.
-      if (await exists(filePath)) return;
+      // Immutable, like the Azure store: the first upload of a path wins and
+      // any later (or concurrent) upload of it is a no-op, never an overwrite.
       if (!root) {
-        memory.set(filePath, { bytes: new Uint8Array(bytes), contentType });
+        // Check-and-set with no await in between, so it cannot interleave.
+        if (!memory.has(filePath)) {
+          memory.set(filePath, { bytes: new Uint8Array(bytes), contentType });
+        }
         return;
       }
       const full = resolve(filePath);
       await fs.mkdir(path.dirname(full), { recursive: true });
-      await fs.writeFile(full, bytes);
-      await fs.writeFile(`${full}.type`, contentType);
+      // Write the complete file under a unique temporary name, then hard-link
+      // it into place. link() is atomic and create-only (EEXIST if the path is
+      // taken), so readers never see a partial file and two concurrent first
+      // uploads cannot both win.
+      const tmp = `${full}.${randomUUID()}.tmp`;
+      let created = false;
+      try {
+        await fs.writeFile(tmp, bytes, { flag: "wx" });
+        try {
+          await fs.link(tmp, full);
+          created = true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        }
+      } finally {
+        await fs.rm(tmp, { force: true });
+      }
+      // The content-type sidecar belongs to whichever upload created the file.
+      // The winner writes it; a retry fills it in only if the winner never got
+      // that far (create-only, so it never replaces the winner's).
+      if (created || !(await fileExists(`${full}.type`))) {
+        await fs.writeFile(`${full}.type`, contentType, { flag: "wx" }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "EEXIST") throw error;
+        });
+      }
     },
 
     exists,
