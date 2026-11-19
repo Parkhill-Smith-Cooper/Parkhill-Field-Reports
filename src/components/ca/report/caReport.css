@@ -187,6 +187,10 @@
   border-left: 3px solid #c8102e;
   padding-left: 0.1in;
 }
+/* A field across both columns (the drawing set). */
+.ca-report .fld.span {
+  grid-column: 1 / -1;
+}
 .ca-report .lb {
   color: #c8102e;
   font-weight: bold;

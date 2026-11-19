@@ -2,8 +2,8 @@
 
 import { Box, Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useParams, usePathname, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { LuChevronRight } from "react-icons/lu";
 
 import { CaSourceTag } from "@/components/ca/CaSourceTag";
@@ -44,8 +44,9 @@ export default function CaProjectLayout({ children }: { children: React.ReactNod
     fetchCaProject(projectNumber)
       .then((result) => {
         void cacheProjects([result]);
-        // Keep the project's reports page (and every report in it) loadable offline.
-        keepForOffline([caProjectPath(projectNumber, "reports")]);
+        // Keep the project's reports page (and every report in it) and its
+        // specifications page loadable offline.
+        keepForOffline([caProjectPath(projectNumber, "reports"), caProjectPath(projectNumber, "specs")]);
         if (active) setLoaded({ key: projectNumber, project: result });
       })
       .catch(async (error: unknown) => {
@@ -116,8 +117,52 @@ export default function CaProjectLayout({ children }: { children: React.ReactNod
           </Stack>
         }
       >
-        <Stack gap={{ base: 5, md: 6 }}>{children}</Stack>
+        <Stack gap={{ base: 5, md: 6 }}>
+          {/* useSearchParams needs a Suspense boundary in the App Router. */}
+          <Suspense fallback={null}>
+            <CaProjectTabs projectNumber={projectNumber} />
+          </Suspense>
+          {children}
+        </Stack>
       </PageShell>
     </CaProjectContext.Provider>
+  );
+}
+
+/**
+ * Reports | Specifications. Hidden inside a report (`?report=`), where the
+ * report's own steps are the navigation and printing must not show it.
+ */
+function CaProjectTabs({ projectNumber }: { projectNumber: string }) {
+  const pathname = usePathname();
+  const search = useSearchParams();
+  if (search.get("report")) return null;
+  const tabs = [
+    { key: "reports", label: "Reports", href: caProjectPath(projectNumber, "reports") },
+    { key: "specs", label: "Specifications", href: caProjectPath(projectNumber, "specs") },
+  ] as const;
+  return (
+    <HStack data-print="hide" gap="1" role="tablist" borderBottomWidth="1px">
+      {tabs.map((tab) => {
+        const active = pathname?.endsWith(`/${tab.key}`) ?? false;
+        return (
+          <Button
+            key={tab.key}
+            asChild
+            variant="ghost"
+            size="lg"
+            role="tab"
+            aria-selected={active}
+            borderRadius="0"
+            borderBottomWidth="2px"
+            borderColor={active ? "brand.solid" : "transparent"}
+            color={active ? "fg" : "fg.muted"}
+            mb="-1px"
+          >
+            <Link href={tab.href}>{tab.label}</Link>
+          </Button>
+        );
+      })}
+    </HStack>
   );
 }

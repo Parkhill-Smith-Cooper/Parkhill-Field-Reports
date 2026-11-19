@@ -6,6 +6,7 @@
  *   {projectNumber}/photos/{photoId}.jpg
  *   {projectNumber}/drawings/{drawingId}.{pdf|png|jpg|webp|svg}
  *   {projectNumber}/drawing-sets/{setId}.pdf
+ *   {projectNumber}/specifications/{sectionId}.pdf
  */
 
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -24,6 +25,10 @@ export function caDrawingPath(
 
 export function caDrawingSetPath(projectNumber: string, setId: string): string {
   return `${projectNumber}/drawing-sets/${setId}.pdf`;
+}
+
+export function caSpecSectionPath(projectNumber: string, sectionId: string): string {
+  return `${projectNumber}/specifications/${sectionId}.pdf`;
 }
 
 /**

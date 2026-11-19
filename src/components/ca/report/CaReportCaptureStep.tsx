@@ -1,8 +1,8 @@
 "use client";
 
-import { Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
-import { useState } from "react";
-import { LuArrowRight, LuImages, LuMap, LuMapPin, LuPlus, LuX } from "react-icons/lu";
+import { Box, Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
+import { useEffect, useState } from "react";
+import { LuArrowRight, LuCloudDownload, LuCloudOff, LuImages, LuMap, LuMapPin, LuPlus, LuX } from "react-icons/lu";
 
 import { CaAddDrawingDialog } from "@/components/ca/CaAddDrawingDialog";
 import { CaCaptureBar } from "@/components/ca/CaCaptureBar";
@@ -15,13 +15,15 @@ import { CaStateLink } from "@/components/ca/CaStateLink";
 import { EmptyState } from "@/components/EmptyState";
 import { notifyError } from "@/components/ui/toaster";
 import { useCaProject } from "@/context/CaProjectContext";
-import { useCaDrawings } from "@/hooks/ca/useCaDrawings";
 import { useCaPhotos } from "@/hooks/ca/useCaPhotos";
 import { useCaPins } from "@/hooks/ca/useCaPins";
+import { useReportSheets } from "@/hooks/ca/useReportSheets";
 import { groupPhotosByPin } from "@/lib/ca/photoGroups";
 import { numberPins, pinName } from "@/lib/ca/pins";
 import { photosOfReport } from "@/lib/ca/reportPhotos";
+import { defaultSheet } from "@/lib/ca/reportSheets";
 import { caReportPath } from "@/lib/ca/routes";
+import { isSyncedSet } from "@/lib/ca/syncedSets";
 import { updateCaDrawing } from "@/services/ca/drawingService";
 
 const SectionLabel = ({ children }: { children: React.ReactNode }) => (
@@ -35,13 +37,21 @@ const SectionLabel = ({ children }: { children: React.ReactNode }) => (
  * capture. Photos taken here belong to this report. Drawings and pins belong
  * to the project, so the same locations can be used on every visit.
  *
+ * Floor plans come from the drawing set the report was made with: the CA
+ * application's current set when the report was started, synced on the
+ * server. Every sheet of it is listed; one nobody has opened yet is rendered
+ * on this device the first time it is chosen. With no set in the CA
+ * application, drawings are added by hand ("Add drawing").
+ *
  * Everything captured here is saved on the device first and syncs on its own,
  * so the step works with no signal once the drawing has been opened online.
  */
 export function CaReportCaptureStep({ reportId }: { reportId: string }) {
   const { projectNumber } = useCaProject();
   const { photos: allPhotos, loaded, serverReachable, editPhoto, deletePhoto } = useCaPhotos(projectNumber);
-  const { drawings, loaded: drawingsLoaded, refresh: refreshDrawings, added } = useCaDrawings(projectNumber);
+  const sheets = useReportSheets(projectNumber, reportId);
+  const { drawings, loaded: drawingsLoaded, refresh: refreshDrawings, added } = sheets.drawingsHook;
+  const { sheetSets, choices, online, prepare, preparing, failed } = sheets;
   const { pins, dropPin, editPin, deletePin } = useCaPins(projectNumber);
 
   const [drawingId, setDrawingId] = useState<string | null>(null);
@@ -51,8 +61,18 @@ export function CaReportCaptureStep({ reportId }: { reportId: string }) {
   const [openPhotoId, setOpenPhotoId] = useState<string | null>(null);
 
   const photos = photosOfReport(allPhotos, reportId);
-  const drawing =
-    drawings.find((d) => d.id === drawingId) ?? drawings.find((d) => d.isCurrent) ?? drawings[0] ?? null;
+  const drawing = choices.find((d) => d.id === drawingId) ?? defaultSheet(choices);
+  const syncedDrawing = Boolean(
+    drawing?.drawingSetId && sheetSets.sets.some((s) => s.id === drawing.drawingSetId && isSyncedSet(s)),
+  );
+  // Waiting for the CA application's set: copied on the server, or listed on a device.
+  const settingUp =
+    !drawing && (sheetSets.syncing || Boolean(sheets.set && sheets.set.indexed === false) || !sheetSets.loaded);
+
+  // A sheet nobody has opened yet is rendered when shown.
+  useEffect(() => {
+    if (drawing?.unrendered && online && !failed[drawing.id]) void prepare(drawing);
+  }, [drawing, online, failed, prepare]);
 
   const numbers = numberPins(pins);
   const pinNames = new Map(pins.map((p) => [p.id, pinName(p, numbers.get(p.id))]));
@@ -97,6 +117,11 @@ export function CaReportCaptureStep({ reportId }: { reportId: string }) {
             <Spinner size="sm" color="brand.solid" />
             <Text color="fg.muted">Loading drawings…</Text>
           </HStack>
+        ) : settingUp ? (
+          <HStack gap="3" py="6" justify="center" data-testid="ca-drawings-syncing">
+            <Spinner size="sm" color="brand.solid" />
+            <Text color="fg.muted">Getting the latest drawings from the CA application…</Text>
+          </HStack>
         ) : !drawing ? (
           <EmptyState
             icon={<LuMap />}
@@ -111,15 +136,47 @@ export function CaReportCaptureStep({ reportId }: { reportId: string }) {
         ) : (
           <>
             <CaDrawingPicker
-              drawings={drawings}
+              drawings={choices}
               value={drawing}
               onChange={(id) => {
                 setDrawingId(id);
                 setDropMode(false);
               }}
               onAdd={() => setAddOpen(true)}
-              onSetCurrent={(d, isCurrent) => void setCurrent(d.id, isCurrent)}
+              // The CA application decides which of its sheets are current.
+              onSetCurrent={syncedDrawing ? undefined : (d, isCurrent) => void setCurrent(d.id, isCurrent)}
             />
+            {sheets.set && <SetLine sheets={sheets} />}
+            {drawing.unrendered ? (
+              <Box
+                borderWidth="1px"
+                borderColor="line"
+                borderRadius="md"
+                py="12"
+                px="4"
+                textAlign="center"
+                data-testid="ca-sheet-preparing"
+              >
+                {failed[drawing.id] ? (
+                  <Stack gap="3" align="center">
+                    <Text color="fg.error">{failed[drawing.id]}</Text>
+                    <Button variant="outline" onClick={() => sheets.retry(drawing.id)}>
+                      Try again
+                    </Button>
+                  </Stack>
+                ) : !online && !preparing[drawing.id] ? (
+                  <Stack gap="2" align="center" color="fg.muted">
+                    <LuCloudOff aria-hidden />
+                    <Text>This sheet has not been opened on this device yet. It opens when you have signal.</Text>
+                  </Stack>
+                ) : (
+                  <HStack gap="3" justify="center">
+                    <Spinner size="sm" color="brand.solid" />
+                    <Text color="fg.muted">Opening {drawing.sheetNumber ?? drawing.title}…</Text>
+                  </HStack>
+                )}
+              </Box>
+            ) : (
             <CaDrawingViewer
               key={drawing.id}
               src={drawing.src}
@@ -142,7 +199,8 @@ export function CaReportCaptureStep({ reportId }: { reportId: string }) {
                 };
               })}
             />
-            {dropMode ? (
+            )}
+            {drawing.unrendered ? null : dropMode ? (
               <HStack gap="3" justify="space-between" bg="brand.subtle" borderRadius="md" px="4" py="3" data-print="hide">
                 <Text fontWeight="medium" color="brand.fg">
                   Tap the drawing where the photos are.
@@ -205,6 +263,7 @@ export function CaReportCaptureStep({ reportId }: { reportId: string }) {
       <CaAddDrawingDialog
         projectNumber={projectNumber}
         drawings={drawings}
+        sheetSets={sheetSets}
         open={addOpen}
         onOpenChange={setAddOpen}
         onAdded={(d, sheet) => {
@@ -234,5 +293,31 @@ export function CaReportCaptureStep({ reportId }: { reportId: string }) {
         onDelete={deletePhoto}
       />
     </Stack>
+  );
+}
+
+/** Which drawing set the report uses, and saving its sheets for a visit with no signal. */
+function SetLine({ sheets }: { sheets: ReturnType<typeof useReportSheets> }) {
+  const set = sheets.set!;
+  const progress = sheets.offlineProgress;
+  return (
+    <HStack gap="2" justify="space-between" wrap="wrap" fontSize="sm" color="fg.muted">
+      <Text data-testid="ca-report-drawing-set">
+        Drawing set: {set.revisionLabel ?? set.title ?? set.fileName}
+        {set.isCurrent === false ? " (a newer set is in the CA application)" : ""}
+      </Text>
+      {sheets.online && sheets.choices.some((c) => c.unrendered) && (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void sheets.saveAllForOffline()}
+          loading={Boolean(progress)}
+          loadingText={progress ? `Saving sheets… ${progress.done} of ${progress.total}` : undefined}
+          data-testid="ca-save-sheets-offline"
+        >
+          <LuCloudDownload /> Save all sheets for offline
+        </Button>
+      )}
+    </HStack>
   );
 }

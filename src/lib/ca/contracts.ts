@@ -29,6 +29,7 @@ import type {
   CaReportContent,
   CaReportRevision,
   CaSourceProject,
+  CaSpecSection,
   NewCaProjectInput,
 } from "@/types/ca";
 
@@ -86,8 +87,33 @@ export interface CaDrawingSetStore {
     setId: string,
     change: (sheets: CaSetSheet[]) => CaSetSheet[],
   ): Promise<CaDrawingSet | null>;
+  /**
+   * Replaces the set with `change(current)`, atomically (retried on a
+   * concurrent write). `change` returning null leaves it as it is. Null if
+   * absent. Used for the sync fields (`isCurrent`, `indexed`, `syncedAt`).
+   */
+  update(
+    projectNumber: string,
+    setId: string,
+    change: (set: CaDrawingSet) => CaDrawingSet | null,
+  ): Promise<CaDrawingSet | null>;
   /** Hides the set (a tombstone; the file is kept). Null if absent. */
   remove(projectNumber: string, setId: string, removedBy: string): Promise<CaDrawingSet | null>;
+}
+
+/** Specification section revisions synced from the CA application. */
+export interface CaSpecSectionStore {
+  /** Every synced revision of every section, by section number then revision. */
+  list(projectNumber: string): Promise<CaSpecSection[]>;
+  get(projectNumber: string, sectionId: string): Promise<CaSpecSection | null>;
+  /** Create-only and idempotent on `id`: a retried create returns the stored record. */
+  create(section: CaSpecSection): Promise<CaSpecSection>;
+  /** Replaces the record with `change(current)`, atomically. Null return keeps it. Null if absent. */
+  update(
+    projectNumber: string,
+    sectionId: string,
+    change: (section: CaSpecSection) => CaSpecSection | null,
+  ): Promise<CaSpecSection | null>;
 }
 
 export interface CaReportStore {
@@ -158,6 +184,7 @@ export interface CaRepository {
   pins: CaPinStore;
   drawings: CaDrawingStore;
   drawingSets: CaDrawingSetStore;
+  specSections: CaSpecSectionStore;
   reports: CaReportStore;
 }
 
@@ -220,6 +247,37 @@ export interface CaDrawingSource {
   readonly kind: "mock" | "ca-app";
   listLatest(projectNumber: string): Promise<CaSourceDrawing[]>;
   /** A stream, so a large drawing set is passed through without being held in memory. */
+  fetchFile(
+    projectNumber: string,
+    externalRef: string,
+  ): Promise<{ bytes: Uint8Array | ReadableStream<Uint8Array>; contentType: string; fileName: string }>;
+}
+
+/**
+ * A specification section revision as the CA application describes it
+ * (parkhill-ccr `toServiceSpecSection`). Only current revisions are offered,
+ * one per section; the source says so (`isLatestApproved`), nothing infers it.
+ */
+export type CaSourceSpecSection = {
+  externalRef: string;
+  sectionKey: string;
+  sectionNumber: string;
+  division: string;
+  title: string;
+  revision: number;
+  revisionLabel?: string;
+  isLatestApproved: boolean;
+  fileType: "pdf";
+  fileName: string;
+  sizeBytes?: number;
+  uploadedAt?: string;
+};
+
+export interface CaSpecSource {
+  readonly kind: "mock" | "ca-app";
+  /** The current revision of every section of the project. */
+  listCurrent(projectNumber: string): Promise<CaSourceSpecSection[]>;
+  /** A stream, so a large section is passed through without being held in memory. */
   fetchFile(
     projectNumber: string,
     externalRef: string,

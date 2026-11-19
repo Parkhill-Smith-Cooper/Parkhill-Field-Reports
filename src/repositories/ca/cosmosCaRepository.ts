@@ -4,6 +4,7 @@ import { CaConflictError, type CaRepository } from "@/lib/ca/contracts";
 import { formatReportNumber } from "@/lib/ca/reportContent";
 import { applyIssueMark, RevisionAlreadyExistsError } from "@/lib/ca/revisions";
 import { byRecentActivity, reportMatches } from "@/lib/ca/search";
+import { bySectionRevision } from "@/lib/ca/specSections";
 import type {
   CaDrawing,
   CaDrawingSet,
@@ -12,6 +13,7 @@ import type {
   CaProject,
   CaReport,
   CaReportRevision,
+  CaSpecSection,
 } from "@/types/ca";
 
 /**
@@ -29,7 +31,7 @@ import type {
  * | ----------- | --------------------------------------------------------- |
  * | caProjects  | project (id = projectNumber)                              |
  * | caCapture   | photo, pin (id = device-generated id)                     |
- * | caDrawings  | drawing, drawingSet                                       |
+ * | caDrawings  | drawing, drawingSet, specSection                          |
  * | caReports   | report, revision (id = `{reportId}_r{n}`), counter        |
  *
  * Semantics match the mock repository exactly (same unit tests):
@@ -369,12 +371,50 @@ export function createCosmosCaRepository(containers: CaCosmosContainers): CaRepo
           sheets: change(current.sheets),
         }));
       },
+      async update(projectNumber, setId, change) {
+        const doc = await read<Typed<CaDrawingSet>>(drawings, setId, projectNumber);
+        if (!doc || doc.type !== "drawingSet") return null;
+        return update<CaDrawingSet>(drawings, setId, projectNumber, (current) => {
+          const next = change(current);
+          return next && { ...next, id: current.id, projectNumber: current.projectNumber };
+        });
+      },
       async remove(projectNumber, setId, removedBy) {
         const doc = await read<Typed<CaDrawingSet>>(drawings, setId, projectNumber);
         if (!doc || doc.type !== "drawingSet") return null;
         return update<CaDrawingSet>(drawings, setId, projectNumber, (current) =>
           current.removed ? null : { ...current, removed: true, removedAt: now(), removedBy },
         );
+      },
+    },
+
+    specSections: {
+      async list(projectNumber) {
+        return (await listByType<CaSpecSection>(drawings, projectNumber, "specSection")).sort(bySectionRevision);
+      },
+      async get(projectNumber, sectionId) {
+        const doc = await read<Typed<CaSpecSection>>(drawings, sectionId, projectNumber);
+        return doc && doc.type === "specSection" ? clean<CaSpecSection>(doc) : null;
+      },
+      async create(section) {
+        try {
+          const { resource } = await drawings.items.create({ ...section, type: "specSection" });
+          return clean<CaSpecSection>(resource) ?? section;
+        } catch (error) {
+          if (status(error) !== 409) throw error;
+          // A retried create: return what is stored.
+          const stored = await read<Typed<CaSpecSection>>(drawings, section.id, section.projectNumber);
+          if (!stored || stored.type !== "specSection") throw new CaConflictError("That specification id is taken.");
+          return clean<CaSpecSection>(stored)!;
+        }
+      },
+      async update(projectNumber, sectionId, change) {
+        const doc = await read<Typed<CaSpecSection>>(drawings, sectionId, projectNumber);
+        if (!doc || doc.type !== "specSection") return null;
+        return update<CaSpecSection>(drawings, sectionId, projectNumber, (current) => {
+          const next = change(current);
+          return next && { ...next, id: current.id, projectNumber: current.projectNumber };
+        });
       },
     },
 

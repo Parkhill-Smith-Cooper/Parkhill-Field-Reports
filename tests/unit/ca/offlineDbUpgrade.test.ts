@@ -25,7 +25,16 @@ function createV1Stores(db: IDBDatabase) {
 describe("on-device database upgrades", () => {
   it("creates every store on a fresh device", async () => {
     const db = await openCaDb();
-    expect([...db.objectStoreNames].sort()).toEqual(["drafts", "drawings", "outbox", "photos", "pins", "projects"]);
+    expect([...db.objectStoreNames].sort()).toEqual([
+      "drafts",
+      "drawingSetIndex",
+      "drawings",
+      "outbox",
+      "photos",
+      "pins",
+      "projects",
+      "specSections",
+    ]);
   });
 
   it("opens a version-2 database (with the retired sheetSets store), keeping data", async () => {
@@ -39,8 +48,9 @@ describe("on-device database upgrades", () => {
     old.close();
 
     const db = await openCaDb();
-    expect(db.version).toBe(3);
+    expect(db.version).toBe(5);
     expect([...db.objectStoreNames]).not.toContain("sheetSets");
+    expect([...db.objectStoreNames]).toContain("drawingSetIndex");
     expect(await db.get("photos", "caph_1")).toMatchObject({ projectNumber: "MOCK-1" });
   });
 
@@ -51,5 +61,45 @@ describe("on-device database upgrades", () => {
 
     const db = await openCaDb();
     expect(await db.get("pins", "capin_1")).toMatchObject({ projectNumber: "MOCK-1" });
+  });
+
+  it("opens a version-3 database, adding the drawing-set index and keeping data", async () => {
+    const old = await openDB(DB_NAME, 3, { upgrade: (db) => createV1Stores(db as unknown as IDBDatabase) });
+    await old.put("drafts", { id: "carep_1", projectNumber: "MOCK-1" });
+    old.close();
+
+    const db = await openCaDb();
+    expect(db.version).toBe(5);
+    expect(await db.get("drafts", "carep_1")).toMatchObject({ projectNumber: "MOCK-1" });
+    await db.put("drawingSetIndex", {
+      id: "dcset_1",
+      projectNumber: "MOCK-1",
+      set: {} as never,
+      cachedAt: "2026-11-19T00:00:00.000Z",
+    });
+    expect(await db.getAllFromIndex("drawingSetIndex", "byProject", "MOCK-1")).toHaveLength(1);
+  });
+
+  it("opens a version-4 database, adding the specification store and keeping data", async () => {
+    const old = await openDB(DB_NAME, 4, {
+      upgrade(db) {
+        createV1Stores(db as unknown as IDBDatabase);
+        (db as unknown as IDBDatabase).createObjectStore("drawingSetIndex", { keyPath: "id" }).createIndex("byProject", "projectNumber");
+      },
+    });
+    await old.put("drawingSetIndex", { id: "dcset_1", projectNumber: "MOCK-1" });
+    old.close();
+
+    const db = await openCaDb();
+    expect(db.version).toBe(5);
+    expect(await db.get("drawingSetIndex", "dcset_1")).toMatchObject({ projectNumber: "MOCK-1" });
+    await db.put("specSections", {
+      id: "dcspec_1",
+      projectNumber: "MOCK-1",
+      section: {} as never,
+      blob: null,
+      cachedAt: "2026-11-19T00:00:00.000Z",
+    });
+    expect(await db.getAllFromIndex("specSections", "byProject", "MOCK-1")).toHaveLength(1);
   });
 });

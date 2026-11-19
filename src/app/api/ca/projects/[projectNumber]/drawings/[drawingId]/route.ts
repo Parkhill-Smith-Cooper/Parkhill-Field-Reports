@@ -1,6 +1,7 @@
 import { apiError } from "@/lib/apiResponse";
 import { caRoute, projectParam } from "@/lib/ca/apiRoute";
 import { caDrawingPath } from "@/lib/ca/paths";
+import { isSyncedSet, syncedSheetDrawingId } from "@/lib/ca/syncedSets";
 import {
   CA_DRAWING_IMAGE_TYPES,
   CA_DRAWING_MAX_BYTES,
@@ -78,9 +79,23 @@ export async function PUT(request: Request, { params }: Params) {
       return apiError("That drawing source is not configured.", 400);
     }
 
-    // A sheet from an uploaded set must come from a set of this project.
-    if (m.drawingSetId && !(await repo.drawingSets.get(p.projectNumber, m.drawingSetId))) {
-      return apiError("That drawing set was not found.", 400);
+    // A sheet from a set must come from a set of this project. A sheet of a
+    // synced set has the id derived from its set and page (so devices
+    // rendering it at the same time make one drawing) and the set's origin.
+    const set = m.drawingSetId ? await repo.drawingSets.get(p.projectNumber, m.drawingSetId) : null;
+    if (m.drawingSetId) {
+      if (!set) return apiError("That drawing set was not found.", 400);
+      if (isSyncedSet(set)) {
+        if (
+          drawingId !== syncedSheetDrawingId(set.id, m.page) ||
+          m.source !== set.source ||
+          m.externalRef !== set.externalRef
+        ) {
+          return apiError("That sheet does not match its drawing set.", 400);
+        }
+      } else if (m.source !== "upload") {
+        return apiError("Invalid drawing set.", 400);
+      }
     }
 
     const file = form.get("file");
@@ -111,7 +126,8 @@ export async function PUT(request: Request, { params }: Params) {
       source: m.source,
       ...(m.externalRef ? { externalRef: m.externalRef } : {}),
       ...(m.drawingSetId ? { drawingSetId: m.drawingSetId } : {}),
-      isCurrent: true,
+      // A sheet of a superseded synced set is never current.
+      isCurrent: set && isSyncedSet(set) ? set.isCurrent === true : true,
       uploadedAt: new Date().toISOString(),
       uploadedBy: await currentUser(),
     });

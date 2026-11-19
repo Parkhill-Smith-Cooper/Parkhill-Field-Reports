@@ -18,12 +18,23 @@ import {
   Text,
 } from "@chakra-ui/react";
 import { useEffect, useRef, useState } from "react";
-import { LuDownload, LuEllipsisVertical, LuFileUp, LuPencil, LuPlus, LuSearch, LuSparkles } from "react-icons/lu";
+import {
+  LuDownload,
+  LuEllipsisVertical,
+  LuFileUp,
+  LuPencil,
+  LuPlus,
+  LuRefreshCw,
+  LuSearch,
+  LuSparkles,
+} from "react-icons/lu";
 
 import { FormField } from "@/components/FormField";
 import { notifyError, toaster } from "@/components/ui/toaster";
 import type { CaDrawingView } from "@/hooks/ca/useCaDrawings";
-import { useCaDrawingSets, type SheetNamingStatus, type UploadProgress } from "@/hooks/ca/useCaDrawingSets";
+import { addSetSheetAsDrawing } from "@/hooks/ca/setSheetDrawing";
+import type { IndexingStatus, SheetNamingStatus, UploadProgress, useCaDrawingSets } from "@/hooks/ca/useCaDrawingSets";
+import { isSyncedSet } from "@/lib/ca/syncedSets";
 import { DRAWING_SET_ACCEPT, isPdf, openPdf, prepareImageSheet, type OpenedPdf } from "@/lib/ca/drawingSheet";
 import { newCaDrawingId } from "@/lib/ca/ids";
 import { MAX_SHEET_NAME, MAX_SHEET_NUMBER, sheetLabel, untitledSheet, type SetSheet } from "@/lib/ca/sheetIndex";
@@ -36,6 +47,7 @@ import {
   type OfferedDrawing,
 } from "@/services/ca/drawingService";
 import type { CaDrawingSetWithUrl } from "@/services/ca/drawingSetService";
+import { isSetIndexed } from "@/types/ca";
 
 import { CaSourceTag } from "./CaSourceTag";
 
@@ -49,7 +61,7 @@ type Pending = {
   externalRef?: string;
 };
 
-type SheetSets = ReturnType<typeof useCaDrawingSets>;
+export type SheetSets = ReturnType<typeof useCaDrawingSets>;
 
 /** Show a "find a sheet" box once a list is longer than this. */
 const FILTER_FROM = 8;
@@ -62,16 +74,17 @@ const FILTER_FROM = 8;
  *   and editable by the engineer. Sets and names are stored on the server
  *   (PDF in Blob Storage), so every device sees them. Each sheet added
  *   becomes a drawing (rendered to an image on this device and uploaded);
- * - or from the configured drawing source. A drawing set (a PDF, as the CA
- *   application's Document Control offers its current set) is imported as a
- *   set like the above; a single sheet image (mock) goes through the
- *   page-and-title step below.
+ * - or from the configured drawing source. The CA application's current
+ *   drawing set (Document Control) is synced automatically, on the server,
+ *   and is listed here like an uploaded set; "Check for updates" asks for it
+ *   now. A single sheet image (mock) goes through the page-and-title step below.
  *
  * Adding a drawing needs a connection; viewing it afterwards does not.
  */
 export function CaAddDrawingDialog({
   projectNumber,
   drawings,
+  sheetSets,
   open,
   onOpenChange,
   onAdded,
@@ -79,13 +92,16 @@ export function CaAddDrawingDialog({
   projectNumber: string;
   /** The project's drawings, to mark sheets already added. */
   drawings: CaDrawingView[];
+  /**
+   * The project's drawing sets, owned by the page (not the dialog) so AI
+   * naming carries on while it is closed and Capture shares the same list.
+   */
+  sheetSets: SheetSets;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAdded: (drawing: CaDrawingWithUrl, sheet: Blob) => void;
 }) {
   const [pending, setPending] = useState<Pending | null>(null);
-  // Mounted with the page, not the dialog, so AI naming carries on while it is closed.
-  const sheetSets = useCaDrawingSets(projectNumber);
   const { refresh: refreshSets } = sheetSets;
 
   // Sets uploaded or renamed on other devices appear when the dialog opens.
@@ -171,6 +187,9 @@ function ChooseStep({
   const [offered, setOffered] = useState<{ source: "mock" | "ca-app" | null; drawings: OfferedDrawing[] } | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  // Versions already on the project (synced or imported earlier).
+  const syncedRefs = new Set(sheetSets.sets.flatMap((s) => (!s.removed && s.externalRef ? [s.externalRef] : [])));
 
   useEffect(() => {
     let active = true;
@@ -212,21 +231,8 @@ function ChooseStep({
     }
     setAdding(`${set.id}:${sheet.page}`);
     try {
-      const rendered = await sheetSets.renderSheet(set.id, sheet.page);
-      const meta: DrawingMeta = {
-        title: sheet.sheetName.trim() || untitledSheet(sheet.page),
-        ...(sheet.sheetNumber.trim() ? { sheetNumber: sheet.sheetNumber.trim() } : {}),
-        originalFileName: set.fileName,
-        fileType: "pdf",
-        page: sheet.page,
-        pageCount: set.pageCount,
-        width: rendered.width,
-        height: rendered.height,
-        source: "upload",
-        drawingSetId: set.id,
-      };
-      const drawing = await putCaDrawing(projectNumber, newCaDrawingId(), meta, rendered.blob);
-      onAdded(drawing, rendered.blob);
+      const { drawing, blob } = await addSetSheetAsDrawing(projectNumber, set, sheet, sheetSets.renderSheet);
+      onAdded(drawing, blob);
     } catch (error) {
       notifyError("Could not add the drawing", error);
     } finally {
@@ -236,7 +242,6 @@ function ChooseStep({
 
   async function importSheet(sheet: OfferedDrawing) {
     if (!offered?.source) return;
-    if (sheet.fileType === "pdf") return importSet(offered.source, sheet);
     setImporting(sheet.externalRef);
     try {
       const file = await fetchOfferedDrawingFile(projectNumber, sheet.externalRef);
@@ -256,38 +261,15 @@ function ChooseStep({
     }
   }
 
-  /**
-   * A drawing set (one PDF) from the source: downloaded to this device, then
-   * stored exactly like an uploaded set (pages listed as sheets, named by AI),
-   * remembering which version it was, so it is offered as "Added" afterwards.
-   */
-  async function importSet(source: "mock" | "ca-app", sheet: OfferedDrawing) {
-    if (!navigator.onLine) {
-      toaster.create({ type: "error", title: "Importing a drawing set needs a connection", description: "Try again when you have signal." });
-      return;
-    }
-    setImporting(sheet.externalRef);
-    setProgress("downloading");
+  /** "Check for updates": the server asks the CA application for the current set now. */
+  async function checkForUpdates() {
+    setChecking(true);
     try {
-      const blob = await fetchOfferedDrawingFile(projectNumber, sheet.externalRef);
-      const file = new File([blob], sheet.fileName, { type: "application/pdf" });
-      setProgress("opening");
-      await sheetSets.upload(file, setProgress, {
-        source,
-        externalRef: sheet.externalRef,
-        ...(sheet.revisionLabel ? { revisionLabel: sheet.revisionLabel } : {}),
-      });
-      setOffered((current) =>
-        current && {
-          ...current,
-          drawings: current.drawings.map((d) => (d.externalRef === sheet.externalRef ? { ...d, imported: true } : d)),
-        },
-      );
+      await sheetSets.checkForUpdates();
     } catch (error) {
-      notifyError("The drawing set could not be imported", error);
+      notifyError("Could not check the CA application", error);
     } finally {
-      setImporting(null);
-      setProgress(null);
+      setChecking(false);
     }
   }
 
@@ -319,10 +301,13 @@ function ChooseStep({
         </Alert.Root>
       )}
 
-      {sheetSets.sets.map((set) => (
+      {/* Superseded versions from the CA application stay on the project (old
+          reports use them) but are not offered for new floor plans. */}
+      {sheetSets.sets.filter((set) => !isSyncedSet(set) || set.isCurrent !== false).map((set) => (
         <SheetSetSection
           key={set.id}
           set={set}
+          indexing={sheetSets.indexing[set.id]}
           status={sheetSets.naming[set.id]}
           added={addedPages(set, drawings)}
           adding={adding?.startsWith(`${set.id}:`) ? Number(adding.split(":")[1]) : null}
@@ -331,8 +316,15 @@ function ChooseStep({
           onAdd={(sheet) => void addSetSheet(set, sheet)}
           onEdit={(page, patch) => sheetSets.editSheet(set.id, page, patch)}
           onRename={() => void sheetSets.nameSheets(set)}
-          onRemove={() =>
-            void sheetSets.removeSet(set.id).catch((error: unknown) => notifyError("Could not remove the drawing set", error))
+          // The CA application decides which of its sets is current; a synced
+          // set comes back on the next sync, so it is not removed here.
+          onRemove={
+            isSyncedSet(set)
+              ? undefined
+              : () =>
+                  void sheetSets
+                    .removeSet(set.id)
+                    .catch((error: unknown) => notifyError("Could not remove the drawing set", error))
           }
         />
       ))}
@@ -340,7 +332,21 @@ function ChooseStep({
       <Stack gap="3">
         <HStack justify="space-between" wrap="wrap">
           <Text fontWeight="semibold">From the CA application</Text>
-          {offered?.source === "mock" && <CaSourceTag source="mock" />}
+          <HStack gap="2">
+            {offered?.source === "mock" && <CaSourceTag source="mock" />}
+            {offered?.source && (
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={checking || sheetSets.syncing}
+                loadingText={sheetSets.syncing ? "Syncing…" : undefined}
+                onClick={() => void checkForUpdates()}
+                data-testid="ca-check-drawing-updates"
+              >
+                <LuRefreshCw /> Check for updates
+              </Button>
+            )}
+          </HStack>
         </HStack>
         {offerError ? (
           <Alert.Root status="info">
@@ -397,14 +403,25 @@ function ChooseStep({
                     )}
                   </HStack>
                 </Box>
+                {sheet.fileType === "pdf" ? (
+                  // The current set is synced automatically; nothing to import.
+                  <Badge
+                    colorPalette={sheet.imported ? "green" : "gray"}
+                    variant="subtle"
+                    size="lg"
+                    flexShrink="0"
+                    data-testid="ca-offered-set-status"
+                  >
+                    {sheet.imported || syncedRefs.has(sheet.externalRef) ? "Synced" : "Syncing…"}
+                  </Badge>
+                ) : (
                 <Button
                   size="lg"
                   variant="outline"
                   flexShrink="0"
                   disabled={sheet.imported || (importing !== null && importing !== sheet.externalRef) || Boolean(progress && !importing)}
                   loading={importing === sheet.externalRef}
-                  loadingText={sheet.fileType === "pdf" ? progressText(progress) : undefined}
-                  aria-label={sheet.imported ? undefined : `Import ${sheet.fileType === "pdf" ? "drawing set " : ""}${sheet.title}`}
+                  aria-label={sheet.imported ? undefined : `Import ${sheet.title}`}
                   onClick={() => importSheet(sheet)}
                 >
                   {sheet.imported ? "Added" : (
@@ -413,6 +430,7 @@ function ChooseStep({
                     </>
                   )}
                 </Button>
+                )}
               </HStack>
             ))}
           </Stack>
@@ -422,12 +440,11 @@ function ChooseStep({
   );
 }
 
-type SetProgress = UploadProgress | "downloading" | "opening";
+type SetProgress = UploadProgress | "opening";
 
 const formatMegabytes = (bytes: number) => `${Math.max(0.1, Math.round(bytes / 104_857.6) / 10)} MB`;
 
 function progressText(progress: SetProgress | null): string {
-  if (progress === "downloading") return "Downloading the set…";
   if (!progress || progress === "opening") return "Opening the PDF…";
   if (progress.phase === "reading") return `Reading sheets… ${progress.done} of ${progress.total}`;
   return `Uploading… ${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%`;
@@ -471,6 +488,7 @@ function NamingLine({ status, onRename, canRename }: { status?: SheetNamingStatu
 
 function SheetSetSection({
   set,
+  indexing,
   status,
   added,
   adding,
@@ -482,6 +500,8 @@ function SheetSetSection({
   onRemove,
 }: {
   set: CaDrawingSetWithUrl;
+  /** A synced set's pages being listed on this device. */
+  indexing?: IndexingStatus;
   status?: SheetNamingStatus;
   added: Set<number>;
   adding: number | null;
@@ -490,7 +510,8 @@ function SheetSetSection({
   onAdd: (sheet: SetSheet) => void;
   onEdit: (page: number, patch: { sheetNumber: string; sheetName: string }) => Promise<void>;
   onRename: () => void;
-  onRemove: () => void;
+  /** Absent for sets the CA application manages. */
+  onRemove?: () => void;
 }) {
   const [filter, setFilter] = useState("");
   const query = filter.trim().toLowerCase();
@@ -504,7 +525,9 @@ function SheetSetSection({
       <HStack justify="space-between" gap="2" align="flex-start">
         <Box minW="0">
           <HStack gap="2" wrap="wrap">
-            <Text fontWeight="semibold">{set.source ? "Drawing set from the CA application" : "Uploaded drawing set"}</Text>
+            <Text fontWeight="semibold">
+              {set.source ? `Drawing set from the CA application${set.title ? `: ${set.title}` : ""}` : "Uploaded drawing set"}
+            </Text>
             {set.source === "mock" && <CaSourceTag source="mock" />}
             {set.revisionLabel && (
               <Badge variant="outline" size="sm" data-testid="ca-set-revision">
@@ -513,9 +536,11 @@ function SheetSetSection({
             )}
           </HStack>
           <Text fontSize="sm" color="fg.muted" wordBreak="break-all">
-            {set.fileName} · {set.pageCount} sheet{set.pageCount === 1 ? "" : "s"}
+            {set.fileName}
+            {isSetIndexed(set) ? ` · ${set.pageCount} sheet${set.pageCount === 1 ? "" : "s"}` : ""}
           </Text>
         </Box>
+        {onRemove && (
         <Menu.Root>
           <Menu.Trigger asChild>
             <IconButton aria-label="Drawing set options" variant="ghost" size="md">
@@ -532,7 +557,25 @@ function SheetSetSection({
             </Menu.Positioner>
           </Portal>
         </Menu.Root>
+        )}
       </HStack>
+
+      {!isSetIndexed(set) && (
+        <HStack gap="2" data-testid="ca-set-indexing">
+          {indexing && "failed" in indexing ? (
+            <Text fontSize="sm" color="fg.error">
+              {indexing.failed}
+            </Text>
+          ) : (
+            <>
+              <Spinner size="sm" />
+              <Text fontSize="sm" color="fg.muted">
+                {indexing ? `Reading sheets… ${indexing.done} of ${indexing.total}` : "Reading sheets…"}
+              </Text>
+            </>
+          )}
+        </HStack>
+      )}
 
       <NamingLine status={status} onRename={onRename} canRename={unnamed} />
 

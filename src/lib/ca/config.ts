@@ -127,6 +127,29 @@ export const caConfig = {
     return required("CA_APP_API_SCOPE");
   },
 
+  /**
+   * Accepting drawing-set pushes from the CA application
+   * (`POST /api/ca/integrations/ccr/drawing-sets`, docs §5). ccr calls with
+   * an app-only Entra token for this app's API, carrying the
+   * `FieldReports.DrawingSync` app role. All three are needed; when any is
+   * blank the endpoint answers 503 and drawing sets still sync on access.
+   *
+   * - `CA_SYNC_TENANT_ID`: the Entra tenant (issuer and signing keys).
+   * - `CA_SYNC_API_AUDIENCE`: the token audience, i.e. this app's
+   *   Application ID URI or client id.
+   * - `CA_SYNC_ALLOWED_CLIENT_ID`: the caller's client id (the CA
+   *   application's managed identity); any other caller is refused.
+   */
+  get caSyncTenantId(): string {
+    return optional("CA_SYNC_TENANT_ID", "");
+  },
+  get caSyncApiAudience(): string {
+    return optional("CA_SYNC_API_AUDIENCE", "");
+  },
+  get caSyncAllowedClientId(): string {
+    return optional("CA_SYNC_ALLOWED_CLIENT_ID", "");
+  },
+
   get cosmosProjectsContainer(): string {
     return optional("COSMOS_CA_PROJECTS_CONTAINER", "caProjects");
   },

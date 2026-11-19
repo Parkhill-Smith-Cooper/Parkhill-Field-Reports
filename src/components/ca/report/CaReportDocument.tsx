@@ -95,6 +95,7 @@ export function CaReportDocument({
   const issued = revision !== null && dateIssued !== null;
   const issuedLabel = issued ? formatLongDate(dateIssued) : editing ? "Set when issued" : "Not issued (draft)";
   const coverUrl = content.coverPhotoId ? photoUrl(content.coverPhotoId) : null;
+  const drawingSetLabel = content.drawingSet?.revisionLabel ?? content.drawingSet?.title ?? "";
   const ed = editing;
 
   const set = <K extends keyof CaReportContent>(key: K, value: CaReportContent[K]) =>
@@ -218,6 +219,15 @@ export function CaReportDocument({
                         {issuedLabel}
                       </div>
                     </div>
+                    {drawingSetLabel && (
+                      // The drawing-set version this report was made with, as the CA application labels it.
+                      <div className="fld span">
+                        <div className="lb">Drawing Set</div>
+                        <div className="v" data-testid="ca-report-drawing-set-label">
+                          {drawingSetLabel}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {ed ? (

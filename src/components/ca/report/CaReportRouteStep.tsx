@@ -9,9 +9,9 @@ import { CaDrawingViewer } from "@/components/ca/CaDrawingViewer";
 import { CaStateLink } from "@/components/ca/CaStateLink";
 import { EmptyState } from "@/components/EmptyState";
 import { useCaProject } from "@/context/CaProjectContext";
-import { useCaDrawings } from "@/hooks/ca/useCaDrawings";
 import { useCaPhotos } from "@/hooks/ca/useCaPhotos";
 import { useCaPins } from "@/hooks/ca/useCaPins";
+import { useReportSheets } from "@/hooks/ca/useReportSheets";
 import { numberPins, pinName } from "@/lib/ca/pins";
 import { photosOfReport } from "@/lib/ca/reportPhotos";
 import { caReportPath } from "@/lib/ca/routes";
@@ -34,7 +34,10 @@ const dayLabel = (day: string) =>
  */
 export function CaReportRouteStep({ reportId }: { reportId: string }) {
   const { projectNumber } = useCaProject();
-  const { drawings, loaded } = useCaDrawings(projectNumber);
+  const sheets = useReportSheets(projectNumber, reportId);
+  const { loaded } = sheets.drawingsHook;
+  // The report's own floor plans that have been opened (a route needs pins).
+  const drawings = sheets.choices.filter((d) => !d.unrendered);
   const { pins } = useCaPins(projectNumber);
   const { photos: allPhotos } = useCaPhotos(projectNumber);
   const photos = photosOfReport(allPhotos, reportId);
