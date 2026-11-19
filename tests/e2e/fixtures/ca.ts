@@ -70,7 +70,7 @@ export async function serverDrawings(request: APIRequestContext, projectNumber: 
   const response = await request.get(`/api/ca/projects/${encodeURIComponent(projectNumber)}/drawings`);
   return (
     (await response.json()) as {
-      drawings: { id: string; title: string; fileType: string; page: number; pageCount: number; source: string }[];
+      drawings: { id: string; title: string; sheetNumber?: string; drawingSetId?: string; fileType: string; page: number; pageCount: number; source: string }[];
     }
   ).drawings;
 }
@@ -95,4 +95,55 @@ export async function waitForCached(page: Page, path: string) {
       { timeout: 45_000, intervals: [500] },
     )
     .toBe(true);
+}
+
+/** Imports a mock sheet on the Capture tab and waits for the viewer. */
+export async function importMockSheet(page: Page, sheet = "A-101") {
+  await page.getByRole("button", { name: "Add drawing" }).first().click();
+  const dialog = page.getByRole("dialog");
+  const row = dialog.getByTestId("ca-offered-drawings").locator("div", { hasText: sheet }).filter({ has: page.getByRole("button", { name: "Import" }) }).last();
+  await row.getByRole("button", { name: "Import" }).click();
+  await expect(dialog.getByTestId("ca-drawing-preview")).toBeVisible();
+  await dialog.getByRole("button", { name: "Add drawing" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByTestId("ca-drawing-viewer")).toBeVisible();
+}
+
+/** Drops a pin at fractions of the sheet and returns the open pin sheet. */
+export async function dropPinAt(page: Page, fx: number, fy: number) {
+  await page.getByRole("button", { name: "Drop pin" }).click();
+  await expect(page.getByTestId("ca-drawing-viewer")).toHaveAttribute("data-drop-mode", "on");
+  const sheet = page.getByTestId("ca-drawing-sheet");
+  const box = (await sheet.boundingBox())!;
+  await sheet.click({ position: { x: box.width * fx, y: box.height * fy } });
+  const pinSheet = page.getByTestId("ca-pin-sheet");
+  await expect(pinSheet).toBeVisible();
+  return pinSheet;
+}
+
+/** The project's reports page (the project home, grouped by discipline). */
+export const caReportsPath = (projectNumber: string) => `/field-reports/${encodeURIComponent(projectNumber)}/reports`;
+
+/**
+ * Opens the project, starts a report under `discipline` and returns its id.
+ * The report opens on its Capture step. With `offlineReady`, waits until the
+ * reports page (which serves every report, offline too) is cached first.
+ */
+export async function startCaReport(
+  page: Page,
+  projectNumber: string,
+  discipline = "Architecture",
+  { offlineReady = false }: { offlineReady?: boolean } = {},
+): Promise<string> {
+  await page.goto(caReportsPath(projectNumber));
+  if (offlineReady) await waitForOfflineReady(page);
+  await page.getByRole("button", { name: `Start a new ${discipline} report` }).click();
+  await expect(page).toHaveURL(/[?&]step=capture/);
+  await expect(page.getByRole("navigation", { name: "Report steps" })).toBeVisible();
+  return new URL(page.url()).searchParams.get("report")!;
+}
+
+/** Moves to one of the open report's steps. */
+export async function openReportStep(page: Page, step: "Capture" | "Report" | "Site Route") {
+  await page.getByRole("navigation", { name: "Report steps" }).getByRole("link", { name: step }).click();
 }

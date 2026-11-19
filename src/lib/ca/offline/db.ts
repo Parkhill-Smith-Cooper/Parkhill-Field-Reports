@@ -2,7 +2,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 
-import type { CaDrawing, CaPin, CaProject, CaReportContent } from "@/types/ca";
+import type { CaDiscipline, CaDrawing, CaPin, CaProject, CaReportContent } from "@/types/ca";
 
 /**
  * The on-device store for CA Field Reports (IndexedDB).
@@ -29,6 +29,8 @@ export type SyncState = "pending" | "synced" | "error";
 export type LocalPhoto = {
   id: string;
   projectNumber: string;
+  /** The report this photo was captured for. Absent on older photos. */
+  reportId?: string;
   /** The downscaled JPEG. Kept after sync so the photo stays viewable offline. */
   blob: Blob | null;
   fileName: string;
@@ -71,6 +73,10 @@ export type LocalDraft = {
   /** The report id (generated on the device when the report was started). */
   id: string;
   projectNumber: string;
+  /** Chosen when the report was started. Absent on older drafts. */
+  discipline?: CaDiscipline;
+  /** Display name of the engineer who started it, shown before it syncs. */
+  createdByName?: string;
   content: CaReportContent;
   createdAt: string;
   clientUpdatedAt: string;
@@ -105,19 +111,35 @@ interface CaDbSchema extends DBSchema {
 export type CaDb = IDBPDatabase<CaDbSchema>;
 
 const DB_NAME = "parkhill-ca-field-reports";
-const DB_VERSION = 1;
+/**
+ * Versions only ever go up: a browser refuses to open a database at a lower
+ * version than it already has (VersionError).
+ * - 1: the stores above.
+ * - 2: briefly (development builds only) added a device-only `sheetSets` store
+ *      for drawing sets, which now live on the server.
+ * - 3: removes `sheetSets` where a version-2 database created it.
+ */
+const DB_VERSION = 3;
+const RETIRED_STORES = ["sheetSets"];
 
 let dbPromise: Promise<CaDb> | null = null;
 
 export function openCaDb(): Promise<CaDb> {
   dbPromise ??= openDB<CaDbSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      db.createObjectStore("projects", { keyPath: "projectNumber" });
-      for (const name of ["photos", "pins", "drawings", "drafts"] as const) {
-        const store = db.createObjectStore(name, { keyPath: "id" });
-        store.createIndex("byProject", "projectNumber");
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1) {
+        db.createObjectStore("projects", { keyPath: "projectNumber" });
+        for (const name of ["photos", "pins", "drawings", "drafts"] as const) {
+          const store = db.createObjectStore(name, { keyPath: "id" });
+          store.createIndex("byProject", "projectNumber");
+        }
+        db.createObjectStore("outbox", { keyPath: "key" });
       }
-      db.createObjectStore("outbox", { keyPath: "key" });
+      // Untyped: retired stores are no longer part of the schema.
+      const raw = db as unknown as IDBDatabase;
+      for (const name of RETIRED_STORES) {
+        if (raw.objectStoreNames.contains(name)) raw.deleteObjectStore(name);
+      }
     },
     blocked() {
       console.warn("[CA offline] Database upgrade blocked by another open tab.");

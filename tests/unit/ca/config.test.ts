@@ -26,9 +26,26 @@ describe("CA config", () => {
   it("azure mode does not default any source to mock", () => {
     vi.stubEnv("CA_DATA_MODE", "azure");
     vi.stubEnv("CA_PROJECT_SOURCE", "");
+    vi.stubEnv("CA_PROJECT_FALLBACK_SOURCE", "");
     vi.stubEnv("CA_DRAWING_SOURCE", "");
-    expect(caConfig.projectSource).toBe("none");
-    expect(caConfig.drawingSource).toBe("none");
+    // The CA application is the primary project source, VantagePoint the fallback,
+    // and its Document Control module the drawing source.
+    expect(caConfig.projectSource).toBe("ca-app");
+    expect(caConfig.projectFallbackSource).toBe("vantagepoint");
+    expect(caConfig.drawingSource).toBe("ca-app");
+  });
+
+  it("mock mode has no fallback project source by default", () => {
+    vi.stubEnv("CA_DATA_MODE", "mock");
+    vi.stubEnv("CA_PROJECT_FALLBACK_SOURCE", "");
+    expect(caConfig.projectFallbackSource).toBe("none");
+    vi.stubEnv("CA_PROJECT_FALLBACK_SOURCE", "ldap");
+    expect(() => caConfig.projectFallbackSource).toThrow(/Invalid CA_PROJECT_FALLBACK_SOURCE/);
+  });
+
+  it("trims a trailing slash from the CA app base URL", () => {
+    vi.stubEnv("CA_APP_API_BASE_URL", "https://ccr.example.test/");
+    expect(caConfig.caAppApiBaseUrl).toBe("https://ccr.example.test");
   });
 
   it("rejects unknown values by name", () => {

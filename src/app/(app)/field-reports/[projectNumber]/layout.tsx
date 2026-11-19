@@ -6,12 +6,11 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LuChevronRight } from "react-icons/lu";
 
-import { CaProjectTabs } from "@/components/ca/CaProjectTabs";
 import { CaSourceTag } from "@/components/ca/CaSourceTag";
 import { CaSyncStatus } from "@/components/ca/CaSyncStatus";
 import { cacheProjects, getCachedProject, isNetworkFailure } from "@/lib/ca/offline/projectCache";
 import { keepForOffline } from "@/lib/ca/offline/shell";
-import { CA_PROJECT_TABS, caProjectPath } from "@/lib/ca/routes";
+import { caProjectPath } from "@/lib/ca/routes";
 import { PageShell } from "@/components/PageShell";
 import { notifyError } from "@/components/ui/toaster";
 import { CaProjectContext } from "@/context/CaProjectContext";
@@ -20,8 +19,9 @@ import { fetchCaProject } from "@/services/ca/projectService";
 import type { CaProject } from "@/types/ca";
 
 /**
- * A CA project: its title and the Capture · Reports · Site Route tabs.
- * Loads the project once and shares it with every tab through context.
+ * A CA project: its title, then its reports grouped by discipline. Each report
+ * has its own Capture · Report · Site Route steps. Loads the project once and
+ * shares it through context.
  */
 export default function CaProjectLayout({ children }: { children: React.ReactNode }) {
   const params = useParams<{ projectNumber: string }>();
@@ -44,8 +44,8 @@ export default function CaProjectLayout({ children }: { children: React.ReactNod
     fetchCaProject(projectNumber)
       .then((result) => {
         void cacheProjects([result]);
-        // Keep all three tabs loadable offline, even ones not opened yet.
-        keepForOffline(CA_PROJECT_TABS.map((t) => caProjectPath(projectNumber, t.key)));
+        // Keep the project's reports page (and every report in it) loadable offline.
+        keepForOffline([caProjectPath(projectNumber, "reports")]);
         if (active) setLoaded({ key: projectNumber, project: result });
       })
       .catch(async (error: unknown) => {
@@ -116,10 +116,7 @@ export default function CaProjectLayout({ children }: { children: React.ReactNod
           </Stack>
         }
       >
-        <Stack gap={{ base: 5, md: 6 }}>
-          <CaProjectTabs projectNumber={projectNumber} />
-          {children}
-        </Stack>
+        <Stack gap={{ base: 5, md: 6 }}>{children}</Stack>
       </PageShell>
     </CaProjectContext.Provider>
   );

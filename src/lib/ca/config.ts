@@ -12,8 +12,10 @@ import "server-only";
  * | Variable            | Values                        | Default                                  |
  * | ------------------- | ----------------------------- | ---------------------------------------- |
  * | `CA_DATA_MODE`      | `mock` · `azure`              | `mock` in development; REQUIRED in production |
- * | `CA_PROJECT_SOURCE` | `mock` · `vantagepoint` · `ca-app` · `none` | `mock` in mock mode, else `none` |
- * | `CA_DRAWING_SOURCE` | `mock` · `ca-app` · `none`    | `mock` in mock mode, else `none`         |
+ * | `CA_PROJECT_SOURCE` | `mock` · `vantagepoint` · `ca-app` · `none` | `mock` in mock mode, else `ca-app` |
+ * | `CA_PROJECT_FALLBACK_SOURCE` | `vantagepoint` · `mock` · `none` | `none` in mock mode, else `vantagepoint` |
+ * | `CA_DRAWING_SOURCE` | `mock` · `ca-app` · `none`    | `mock` in mock mode, else `ca-app`       |
+ * | `CA_SHEET_NAMING`   | `openai` · `mock` · `none`    | `openai` when `OPENAI_API_KEY` is set, else `none` |
  *
  * `azure` mode never falls back to mock data. If Azure is misconfigured the
  * request fails with a message naming the missing variable, exactly as CX
@@ -23,7 +25,9 @@ import "server-only";
 
 export type CaDataMode = "mock" | "azure";
 export type CaProjectSourceMode = "mock" | "vantagepoint" | "ca-app" | "none";
+export type CaProjectFallbackMode = "vantagepoint" | "mock" | "none";
 export type CaDrawingSourceMode = "mock" | "ca-app" | "none";
+export type CaSheetNamingMode = "openai" | "mock" | "none";
 
 function readEnum<T extends string>(
   name: string,
@@ -69,11 +73,21 @@ export const caConfig = {
     });
   },
 
+  /** Where New Project lists projects from. The CA application is the primary source. */
   get projectSource(): CaProjectSourceMode {
     return readEnum<CaProjectSourceMode>(
       "CA_PROJECT_SOURCE",
       ["mock", "vantagepoint", "ca-app", "none"],
-      () => (this.dataMode === "mock" ? "mock" : "none"),
+      () => (this.dataMode === "mock" ? "mock" : "ca-app"),
+    );
+  },
+
+  /** Used when the project source cannot be reached (VantagePoint by default in Azure). */
+  get projectFallbackSource(): CaProjectFallbackMode {
+    return readEnum<CaProjectFallbackMode>(
+      "CA_PROJECT_FALLBACK_SOURCE",
+      ["vantagepoint", "mock", "none"],
+      () => (this.dataMode === "mock" ? "none" : "vantagepoint"),
     );
   },
 
@@ -81,16 +95,34 @@ export const caConfig = {
     return readEnum<CaDrawingSourceMode>(
       "CA_DRAWING_SOURCE",
       ["mock", "ca-app", "none"],
-      () => (this.dataMode === "mock" ? "mock" : "none"),
+      () => (this.dataMode === "mock" ? "mock" : "ca-app"),
     );
   },
 
-  /** Base URL of the CA application's API. Not yet known - see the README. */
-  get caAppApiBaseUrl(): string {
-    return required("CA_APP_API_BASE_URL");
+  /**
+   * How drawing-set sheets are named: by OpenAI from their title blocks, by a
+   * deterministic MOCK reader (tests; nothing leaves the server), or not at
+   * all (engineers name sheets by hand).
+   */
+  get sheetNaming(): CaSheetNamingMode {
+    return readEnum<CaSheetNamingMode>("CA_SHEET_NAMING", ["openai", "mock", "none"], () =>
+      process.env.OPENAI_API_KEY ? "openai" : "none",
+    );
   },
 
-  /** Entra scope for app-to-app calls to the CA application. Not yet known. */
+  /**
+   * Base URL of the CA application (parkhill-ccr backend), without `/api`,
+   * e.g. the parkhill-contract-management-backend Web App's URL.
+   */
+  get caAppApiBaseUrl(): string {
+    return required("CA_APP_API_BASE_URL").replace(/\/+$/, "");
+  },
+
+  /**
+   * Entra scope for app-only calls to the CA application, e.g.
+   * `api://<ccr app id>/.default`. The ccr backend must grant this app its
+   * `FieldReports.Read` app role (docs/ca-integration-contracts.md §5).
+   */
   get caAppApiScope(): string {
     return required("CA_APP_API_SCOPE");
   },

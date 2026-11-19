@@ -21,7 +21,8 @@ reference; this is the short list of things that are easy to get wrong.
 
 - **Do not regress CX.** Don't refactor CX code to suit CA. CA has changed
   only these CX-shared files, all additively:
-  - `AppHeader` and `FieldReportsMenu` (switcher; no section badge), `relayState` (landing), the projects-page eyebrow,
+  - `AppHeader` (also mounts `CaNavSearch`, which renders nothing on CX
+    pages) and `FieldReportsMenu` (switcher; no section badge), `relayState` (landing), the projects-page eyebrow,
     the root description;
   - `proxy.ts` (matcher excludes `sw.js`, the manifest and the icon);
   - `apiClient.ts` (`apiPutForm`, `apiGetBlob`);
@@ -31,9 +32,11 @@ reference; this is the short list of things that are easy to get wrong.
 - **No real data in tests or development.** CA defaults to
   `CA_DATA_MODE=mock`. Playwright intercepts CX `/api` calls. Never point
   tests at Cosmos or Blob.
-- **Don't guess upstream behaviour.** How the CA application picks the
-  "latest approved" drawing set, its API and its auth are unknown. Leave the
-  `ca-app` stubs throwing `CaNotConfiguredError` and record questions in
+- **Don't guess upstream behaviour.** Projects and drawing sets come from
+  parkhill-ccr with an app-only token (`FieldReports.Read`), which ccr admits
+  only to its `SERVICE_ROUTE_GRANTS` read routes: `GET /api/projects`
+  (VantagePoint is the fallback) and Document Control's two `/service/`
+  routes. ccr says which set is current; never infer it. Record questions in
   `docs/ca-integration-contracts.md`.
 - **Start Tracking is a placeholder.** Don't add location tracking without a
   decision. See `docs/ca-positioning-research.md`.
@@ -56,8 +59,10 @@ reference; this is the short list of things that are easy to get wrong.
   - Ids are generated on the device (`src/lib/ca/ids.ts`).
   - The newer `clientUpdatedAt` wins on the server.
   - Never write CA data straight to the API from a component.
-- **Reports open by query string** inside the Reports tab (`caReportPath`,
-  `caNavigate`, `CaStateLink`), not by route segments. That is what makes
+- **Reports open by query string** on the project's reports page
+  (`caReportPath(p, id, step?)`, `caNavigate`, `CaStateLink`), not by route
+  segments. Capture / Report / Site Route are steps of a report (`&step=`);
+  reports are grouped by discipline (`CA_DISCIPLINES`). That is what makes
   offline-started reports open with no signal.
 - **Issued revisions are immutable:** create-only, `{reportId}_r{n}`, Rev 0
   first. Nothing may update or delete one, or the files it references.

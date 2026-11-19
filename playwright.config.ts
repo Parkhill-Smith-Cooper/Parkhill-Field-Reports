@@ -69,6 +69,8 @@ export default defineConfig({
       CA_DATA_MODE: "mock",
       CA_PROJECT_SOURCE: "mock",
       CA_DRAWING_SOURCE: "mock",
+      // Drawing-set sheets are named by the MOCK reader: never by OpenAI.
+      CA_SHEET_NAMING: "mock",
       CA_MOCK_DATA_DIR: ".ca-dev-data/e2e",
       APP_BASE_URL: BASE_URL,
     },

@@ -108,6 +108,7 @@ export function createSyncEngine(deps: {
       takenAt: photo.takenAt,
       clientUpdatedAt: photo.clientUpdatedAt,
       ...(photo.pinId ? { pinId: photo.pinId } : {}),
+      ...(photo.reportId ? { reportId: photo.reportId } : {}),
       ...(photo.width ? { width: photo.width } : {}),
       ...(photo.height ? { height: photo.height } : {}),
       ...(photo.deleted ? { deleted: true } : {}),
@@ -186,6 +187,7 @@ export function createSyncEngine(deps: {
       draft: draft.content,
       clientUpdatedAt: draft.clientUpdatedAt,
       createdAt: draft.createdAt,
+      ...(draft.discipline ? { discipline: draft.discipline } : {}),
     });
     const latest = await db.get("drafts", draft.id);
     const changed = latest && latest.clientUpdatedAt !== draft.clientUpdatedAt;

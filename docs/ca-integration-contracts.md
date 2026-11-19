@@ -6,8 +6,9 @@ today, and what must be confirmed or built before production.
 
 The rule throughout: **nothing here guesses.** Where a fact about the CA
 application (parkhill-ccr), its drawings or its API was not known, the code
-has a stub that fails with a clear "not connected yet" message, and the
-question is listed under [Open questions](#open-questions).
+had a stub that failed with a clear "not connected yet" message, and the
+question was listed under [Open questions](#open-questions). Projects and
+drawing sets are now connected to parkhill-ccr (§5).
 
 ---
 
@@ -33,8 +34,8 @@ used is decided in one place,
 | --- | --- | --- | --- |
 | `CaRepository` | memory + `.ca-dev-data/db.json` | `cosmosCaRepository.ts` | **Built, unit-tested against an in-memory stand-in only. Never run against Cosmos.** |
 | `CaFileStore` | local disk under `.ca-dev-data/files` | `blobFileStore.ts` | **Built, typechecked. Never run against Blob.** |
-| `CaProjectSource` | 3 labelled sample projects | `vantagepoint` (reuses CX lookup) works; `ca-app` is a stub | Needs the CA app API |
-| `CaDrawingSource` | 2 labelled sample SVG sheets | `ca-app` is a stub | Needs the CA app API and the drawing rules below |
+| `CaProjectSource` | 3 labelled sample projects | `ca-app` (parkhill-ccr `GET /api/projects`), falling back to `vantagepoint` (reuses CX lookup) | Built; ccr accepts the `FieldReports.Read` app-only token (§5) |
+| `CaDrawingSource` | 2 labelled sample SVG sheets | `ca-app`: the current set from ccr's **Document Control** module (§5) | Built and unit-tested on recorded samples; import flow covered by e2e |
 | `CaReportRenderer` | — (browser print-to-PDF) | not built | Optional future |
 
 ## 2. Configuration
@@ -44,10 +45,12 @@ All blank placeholders are in `.env.example`. No CA setting is a secret.
 | Variable | Values | Default |
 | --- | --- | --- |
 | `CA_DATA_MODE` | `mock` \| `azure` | `mock` in development; **required in production** (startup error if unset) |
-| `CA_PROJECT_SOURCE` | `mock` \| `vantagepoint` \| `ca-app` \| `none` | `mock` in mock mode, else `none` (manual entry only) |
-| `CA_DRAWING_SOURCE` | `mock` \| `ca-app` \| `none` | `mock` in mock mode, else `none` (upload only) |
-| `CA_APP_API_BASE_URL` | URL | required only when a source is `ca-app` |
-| `CA_APP_API_SCOPE` | Entra scope, e.g. `api://…/.default` | required only when a source is `ca-app` |
+| `CA_PROJECT_SOURCE` | `mock` \| `vantagepoint` \| `ca-app` \| `none` | `mock` in mock mode, else `ca-app` |
+| `CA_PROJECT_FALLBACK_SOURCE` | `vantagepoint` \| `mock` \| `none` | `none` in mock mode, else `vantagepoint`. Used when the project source fails; manual entry is offered only when both fail |
+| `CA_DRAWING_SOURCE` | `mock` \| `ca-app` \| `none` | `mock` in mock mode, else `ca-app`. Uploading a set by hand always works |
+| `CA_SHEET_NAMING` | `openai` \| `mock` \| `none` | `openai` when `OPENAI_API_KEY` is set, else `none` (sheets named by hand). Tests use `mock` |
+| `CA_APP_API_BASE_URL` | URL of the ccr backend, without `/api` | required for `ca-app`; when missing, New Project falls back and Add Drawing offers upload only |
+| `CA_APP_API_SCOPE` | Entra scope: `api://4c90a6d1-7ffa-47df-8d48-46b9e9f698af/.default` (ccr's `contract-management-app`) | required for `ca-app`, as above |
 | `COSMOS_CA_PROJECTS_CONTAINER` | name | `caProjects` |
 | `COSMOS_CA_CAPTURE_CONTAINER` | name | `caCapture` |
 | `COSMOS_CA_DRAWINGS_CONTAINER` | name | `caDrawings` |
@@ -71,7 +74,7 @@ existing database (`COSMOS_DATABASE`). The app never creates containers.
 | --- | --- | --- |
 | `caProjects` | `project` (id = projectNumber) | Cross-partition query for the list (small) |
 | `caCapture` | `photo`, `pin` (id = device-generated) | High write volume from sync |
-| `caDrawings` | `drawing` | Low volume |
+| `caDrawings` | `drawing`, `drawingSet` (sheets with their numbers and names) | Low volume |
 | `caReports` | `report`, `revision` (id `{reportId}_r{n}`), `counter` (id `reportCounter`) | Revisions are create-only |
 
 Blob: one private container, `ca-files`, in the existing storage account.
@@ -80,6 +83,7 @@ Blob: one private container, `ca-files`, in the existing storage account.
 | --- | --- |
 | `{projectNumber}/photos/{photoId}.jpg` | Photos (downscaled on the device, ≤ 8 MB) |
 | `{projectNumber}/drawings/{drawingId}.{png\|jpg\|webp}` | Drawing sheet images (≤ 25 MB) |
+| `{projectNumber}/drawing-sets/{setId}.pdf` | Uploaded drawing-set PDFs (≤ 512 MB), uploaded as 8 MB staged blocks and committed as one block blob |
 
 ### Roles and settings
 
@@ -88,7 +92,11 @@ Blob: one private container, `ca-files`, in the existing storage account.
   the new containers. They do if they were granted at account scope.
 - **Blob CORS:** allow `GET` from the app's origin on the storage account. The
   browser downloads drawing sheets with `fetch`, from short-lived SAS URLs, to
-  keep them for offline use. Photos shown in `<img>` do not need CORS.
+  keep them for offline use, and reads drawing-set PDFs with pdf.js. Allow the
+  `Range` request header and expose `Accept-Ranges`, `Content-Range` and
+  `Content-Length` so pdf.js fetches only the pages it needs (without them it
+  downloads the whole PDF, which still works). Photos shown in `<img>` do not
+  need CORS. Uploads go through the app, so no write CORS rule is needed.
 - **Content Security Policy:** if a CSP is added later, `img-src` and
   `connect-src` must allow `https://{account}.blob.core.windows.net`.
 
@@ -120,14 +128,19 @@ duplicates.
 | --- | --- |
 | `GET/POST /api/ca/projects` | List / create CA projects |
 | `GET/PATCH/DELETE /api/ca/projects/{p}` | One project. DELETE is refused (409) if any report was issued |
-| `GET /api/ca/source-projects` | Projects offered by `CaProjectSource`, not yet set up |
+| `GET /api/ca/source-projects` | `{source, fellBackFrom?, notice?, projects}`: projects from `CaProjectSource`, or the fallback source when it fails. Projects already set up here are included with `alreadyCreated: true` (shown greyed out). `source: null` means no source answered |
+| `GET /api/ca/search?q=…` | Nav-bar search, 2–100 characters: `{projects, reports}`. Projects by number, name or client; reports in every project by number, author, discipline or project. At most 20 of each |
 | `GET /api/ca/projects/{p}/photos` | Photos with read URLs |
-| `PUT /api/ca/projects/{p}/photos/{photoId}` | Idempotent multipart upload: `meta` (JSON) + `file` (JPEG, first time only). Newer `clientUpdatedAt` wins |
+| `PUT /api/ca/projects/{p}/photos/{photoId}` | Idempotent multipart upload: `meta` (JSON, optional `reportId`, kept from the first sync) + `file` (JPEG, first time only). Newer `clientUpdatedAt` wins |
 | `GET /api/ca/projects/{p}/pins`, `PUT …/pins/{pinId}` | Pins. Deletion is `deleted: true`. Newer edit wins |
-| `GET /api/ca/projects/{p}/drawings`, `PUT/PATCH …/drawings/{drawingId}` | Drawing sheets. PUT is multipart: `meta` + sheet **image**. PATCH renames or marks superseded |
-| `GET /api/ca/projects/{p}/source-drawings[?ref=…]` | Sheets offered by `CaDrawingSource`, or one sheet's file |
+| `GET /api/ca/projects/{p}/drawings`, `PUT/PATCH …/drawings/{drawingId}` | Drawing sheets. PUT is multipart: `meta` (with `drawingSetId` for a sheet of an uploaded set) + sheet **image**. PATCH renames or marks superseded |
+| `GET /api/ca/projects/{p}/source-drawings[?ref=…]` | What `CaDrawingSource` offers (each with `imported`: a drawing, or a live drawing set, carries its `externalRef`), or one offer's file, streamed |
+| `GET /api/ca/projects/{p}/drawing-sets` | Uploaded drawing sets (not removed), with their sheets and a read URL for the PDF |
+| `PUT /api/ca/projects/{p}/drawing-sets/{setId}/blocks/{n}` | One ≤ 8 MB block of the PDF (multipart `block`). Block 0 must start `%PDF-`. Re-sending replaces it |
+| `PUT/PATCH/DELETE /api/ca/projects/{p}/drawing-sets/{setId}` | Commit the blocks and record the set (`{fileName, blockCount, pageCount, sheets, source?, externalRef?, revisionLabel?}`, idempotent; `source` must be the configured drawing source) / correct one sheet (`{page, sheetNumber, sheetName}`, marked edited) / remove (tombstone; the PDF is kept) |
+| `POST /api/ca/projects/{p}/drawing-sets/{setId}/sheet-names` | `{pages}`: title-block text (or image) of ≤ 8 pages. Names them with `CA_SHEET_NAMING` and saves them; edited sheets are kept. 503 when naming is off |
 | `GET /api/ca/projects/{p}/reports` | Reports |
-| `GET/PUT/DELETE /api/ca/projects/{p}/reports/{id}` | Report and its revision list / idempotent create-or-save draft (`{draft, clientUpdatedAt, createdAt}`) / delete a never-issued draft |
+| `GET/PUT/DELETE /api/ca/projects/{p}/reports/{id}` | Report and its revision list / idempotent create-or-save draft (`{draft, clientUpdatedAt, createdAt, discipline?}`; the first PUT fixes the discipline and stamps `createdBy` and `createdByName` from the session) / delete a never-issued draft |
 | `POST /api/ca/projects/{p}/reports/{id}/issue` | `{expectedDraftUpdatedAt}`. Freezes the next revision and stamps Date Issued with the server clock. 409 if the stored draft is not the reviewed version. 422 if a photo has not uploaded. Safe to retry |
 | `GET /api/ca/projects/{p}/reports/{id}/revisions/{n}` | One issued revision, with read URLs for its frozen photo paths |
 | `GET /api/ca/files/{path}` | **Mock mode only.** In azure mode, read URLs are Blob SAS URLs and this returns 404 |
@@ -141,44 +154,107 @@ Error mapping (`src/lib/ca/apiRoute.ts`):
 | Missing photo | 422 |
 | Bad `CA_*` setting | 500, naming the variable |
 
-## 5. Upstream sources to implement
+## 5. Upstream sources
 
 ### `CaProjectSource` (`ca-app`): `src/repositories/ca/sources.ts`
 
-```ts
-interface CaProjectSource {
-  kind: "ca-app";
-  list(): Promise<{ projectNumber; name; client?; source: "ca-app"; externalRef? }[]>;
-}
-```
+The CA application is the **parkhill-ccr backend** (Express, Azure Web App
+`parkhill-contract-management-backend`, all routes under `/api`). New Project
+lists its projects; when it cannot be reached, the list comes from
+VantagePoint instead (`CA_PROJECT_FALLBACK_SOURCE`).
 
-Return the projects CA should be able to set up. `projectNumber` becomes the
-document id, the partition key and a file-path segment, so it must pass
-`isValidProjectNumber` (letters, numbers, `.`, `-`, `_`). Call the CA app with
-an Entra app-to-app token for `CA_APP_API_SCOPE`, using the existing
-`DefaultAzureCredential`. On failure, throw `CaNotConfiguredError` with a
-message an engineer can act on. The UI then offers manual entry.
+**Endpoint.** `GET {CA_APP_API_BASE_URL}/api/projects` returns ccr's Cosmos
+project documents (no paging). Mapping, in
+[`src/lib/ca/ccrProjects.ts`](../src/lib/ca/ccrProjects.ts):
+
+| ccr field | CA project | Notes |
+| --- | --- | --- |
+| `archProjectNumber` | `projectNumber` | e.g. `45371.25.01`; must pass `isValidProjectNumber`, else skipped |
+| `name` | `name` | |
+| `id` | `externalRef` | |
+| `archived: true` | — | not offered |
+| — | `client` | ccr has no client field; left empty for the engineer |
+
+VantagePoint numbers (the fallback) are converted with ccr's own rule
+(`archProjectNumberFromWbs`: `4537125.01` → `45371.25.01`) so the same project
+gets the same number whichever list it was picked from. **To verify:** that
+the Fabric `WBS1` column has that single-dot form; numbers in any other form
+are used unchanged.
+
+**Auth: an app role on ccr.** Field Reports signs in with SAML, so it has no
+user token to pass on; it calls ccr with its own identity instead:
+
+1. ccr's API app registration, `contract-management-app` (client id
+   `4c90a6d1-7ffa-47df-8d48-46b9e9f698af`), defines the **application** app
+   role `FieldReports.Read`.
+2. That role is granted to the Field Reports App Service's managed identity
+   (`Parkhill-Field-Reports`).
+3. ccr's `backend/middleware/requireAuth.js` accepts app-only tokens with that
+   role **only** on `SERVICE_ROUTE_GRANTS`: `GET /api/projects`,
+   `GET /api/projects/number/:n` and the two Document Control `/service/`
+   reads below. Anything else is 403 `service_route_not_allowed`. The project
+   routes answer it with a slim view (`id`, `archProjectNumber`, `name`,
+   `archived`, `status`).
+4. Field Reports sets `CA_APP_API_BASE_URL` and `CA_APP_API_SCOPE`.
+
+Field Reports gets the token with `DefaultAzureCredential` (the managed
+identity in Azure, so the App Service must **not** set `AZURE_CLIENT_ID` /
+`AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`). Any failure (not configured, no
+token, 401/403, timeout, 5xx, unexpected body) is logged on the server and
+becomes a `CaNotConfiguredError`, which makes New Project fall back to
+VantagePoint. Running locally, `az login` gives a *user* token, which ccr
+refuses, so this only answers from the deployed App Service.
+
+**Disciplines.** ccr's project roster (`team[].role`) uses `Arch`, `Civil`,
+`MP`, `Elec` and `Struc`, which match the five report disciplines here
+(Architecture, Civil, MP, Electrical, Structural). Not used yet; a later step
+could show each discipline's lead on its report group.
 
 ### `CaDrawingSource` (`ca-app`): same file
+
+Drawing sets come from ccr's **Document Control** module
+(`backend/routes/documentControl.js`): one PDF per version, append-only; the
+**current set is the highest version**, and ccr says so. Two service routes,
+paths in [`src/lib/ca/ccrDrawings.ts`](../src/lib/ca/ccrDrawings.ts):
+
+| ccr route | Field Reports |
+| --- | --- |
+| `GET /api/document-control/service/projects/number/{n}/latest` | `listLatest`: `[]` or the current set. **404** (project not in ccr) is `[]` |
+| `GET /api/document-control/service/projects/number/{n}/versions/{versionId}/file` | `fetchFile`: the PDF, streamed through without buffering |
+
+`/latest` items are already in the `CaSourceDrawing` shape (`toServiceDrawing`
+in ccr): `externalRef` = the version id (`<ccr project id>-v<n>`), `title` =
+the set's label ("100% CD"), `revisionLabel` = "v<n> — <label>",
+`isLatestApproved: true`, `fileType: "pdf"`, `fileName`, `size` (→
+`sizeBytes`). `mapCcrDrawings` offers only PDFs with a usable id, and keeps
+`isLatestApproved` only when it is exactly `true`.
+
+**How it is used.** Add Drawing lists the current set under "From the CA
+application". **Import** downloads the PDF to the device through
+`/api/ca/projects/{p}/source-drawings?ref=…` (which only serves refs that
+`listLatest` returned for that project) and stores it exactly like an
+uploaded set: every page a sheet, named from its title block, then sheets
+added as drawings. The set records `source`, `externalRef` and
+`revisionLabel`, so that version shows as **Added** on every device while the
+set is on the project. A newer version in ccr is offered as a new import; sets
+and drawings already in Field Reports are never changed by it.
+
+Failures other than 404 (not configured, 401/403, timeout, 5xx) are logged and
+shown as "could not be loaded" in the dialog; uploading a set by hand still
+works.
 
 ```ts
 interface CaDrawingSource {
   kind: "ca-app";
-  listLatest(projectNumber): Promise<CaSourceDrawing[]>;   // the sheets to offer
-  fetchFile(projectNumber, externalRef): Promise<{ bytes; contentType; fileName }>;
+  listLatest(projectNumber): Promise<CaSourceDrawing[]>;
+  fetchFile(projectNumber, externalRef): Promise<{ bytes: Uint8Array | ReadableStream; contentType; fileName }>;
 }
-type CaSourceDrawing = { externalRef; title; sheetNumber?; revisionLabel?;
-                         isLatestApproved: boolean; fileType: "pdf" | "image"; fileName };
+type CaSourceDrawing = { externalRef; title; sheetNumber?; revisionLabel?; isLatestApproved: boolean;
+                         fileType: "pdf" | "image"; fileName; sizeBytes? };
 ```
 
-- `isLatestApproved` and `revisionLabel` must come **from the CA app**. The app
-  shows them as given and never infers "latest approved" from a file name or
-  folder.
-- `fetchFile` may return a **multi-page PDF**. The browser opens it with
-  pdf.js, the engineer picks the floor-plan page, and the device uploads that
-  page as an image. The server needs no PDF tooling.
-- The browser downloads the file through `/api/ca/projects/{p}/source-drawings?ref=…`,
-  which only serves refs that `listLatest` returned for that project.
+A `pdf` offer is imported as a drawing set; an `image` offer (the mock sheets)
+goes through the page-and-title step as a single drawing.
 
 ### `CaReportRenderer` (optional)
 
@@ -196,18 +272,24 @@ Defined once in [`src/types/ca.ts`](../src/types/ca.ts).
 - **CaProject**: `id = projectNumber`, name, client, source (`ca-app` |
   `vantagepoint` | `manual` | `mock`), externalRef.
 - **CaPhoto**: device-generated id, `filePath` (fixed at first write), caption,
-  `takenAt`, optional `pinId`, `clientUpdatedAt`. Photos belong to the
-  **project**, not a report. That is what allows capture first and reports
-  later.
+  `takenAt`, optional `pinId`, `clientUpdatedAt`, and `reportId`: the report
+  whose Capture step took it (fixed at first sync). Older photos have no
+  `reportId` and stay available to every report.
 - **CaPin**: drawingId, `x`/`y` as fractions (0–1) of the sheet, label, note,
   `deleted`. A pin's photos are the photos whose `pinId` points to it. The link
   is stored on the photo only.
 - **CaDrawing**: the sheet image (`filePath`, `width`, `height`), original file
   name, PDF `page`/`pageCount`, source and externalRef, `isCurrent`
   (superseded sheets are kept).
+- **CaDrawingSet**: the set's PDF (`filePath`), `pageCount`, `sheets` (number,
+  name, how it was named), and for an imported set `source`, `externalRef`
+  (the ccr version id) and `revisionLabel`.
 - **CaReport**: device-generated id, `reportNumber` (per project, "001"),
-  `draft` (CaReportContent), `draftUpdatedAt`, `latestRevision` (null until
-  issued), `hasUnissuedChanges`.
+  `discipline` (`architecture` | `civil` | `mp` | `electrical` |
+  `structural`, fixed when started; absent on older reports, listed as
+  "Unassigned"), `createdBy` (UPN) and `createdByName` (display name), `draft`
+  (CaReportContent), `draftUpdatedAt`, `latestRevision` (null until issued),
+  `hasUnissuedChanges`.
 - **CaReportRevision**: id `{reportId}_r{n}`, revision number (Rev 0 is the
   first issue), `dateIssued` (server clock), `issuedBy`, full `content`
   snapshot, frozen `photoPaths`, `contentHash`. Created once and never
@@ -215,21 +297,20 @@ Defined once in [`src/types/ca.ts`](../src/types/ca.ts).
 
 ## 7. Open questions
 
-These must be confirmed with the CA application owner before connecting
-`ca-app`. Nothing in the code assumes an answer.
+Nothing in the code assumes an answer to these.
 
-1. **API surface and auth** for parkhill-ccr: base URL, endpoints, and whether
-   app-to-app Entra auth (client credentials) is supported, with which scope.
-2. **Project identity.** Is the CA app's project key the VantagePoint WBS1 /
-   project number used by CX, or something else that needs mapping?
-3. **Drawing sets.** Where do the files physically live (SharePoint, Blob, the
-   CA app's own store)? How is a set organised (per discipline, per sheet)?
-4. **"Latest approved".** How does the CA app decide which drawing set or
-   revision is current and approved: a status flag, an approval record, a
-   naming convention such as "100% CD", or a folder? The UI expects the
-   source to say so explicitly.
-5. **Sheet metadata.** Does the CA app expose sheet numbers and titles, or
-   only file names?
+1. **ccr app role.** *Answered:* built in ccr (§5), and the role is granted to
+   `Parkhill-Field-Reports`. ccr must be deployed with it, and its
+   `document-control` Cosmos container created, before `ca-app` answers.
+2. **Project identity.** *Answered:* ccr's key is `archProjectNumber`
+   (e.g. `45371.25.01`), derived from the VantagePoint WBS number. *To verify:*
+   the exact form of Fabric `WBS1`, so VantagePoint fallback numbers match.
+3. **Drawing sets.** *Answered:* ccr's Document Control module, one PDF per
+   version (§5). A project has one set at a time (no per-discipline sets).
+4. **"Latest approved".** *Answered:* the highest version is current; ccr's
+   `/latest` returns only that one, with `isLatestApproved: true`.
+5. **Sheet metadata.** *Answered:* none; ccr stores the set as one PDF. Sheets
+   are read from the title blocks here, as for an uploaded set.
 6. **Write-back.** Should issued reports (PDF or data) be pushed back into the
    CA app, and if so, in what format?
 7. **Retention and records policy** for issued revisions and their photos.

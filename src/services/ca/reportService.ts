@@ -1,7 +1,7 @@
 "use client";
 
 import { apiDelete, apiGet, apiPost, apiPut } from "@/services/apiClient";
-import type { CaReport, CaReportContent, CaReportRevision, CaRevisionSummary } from "@/types/ca";
+import type { CaDiscipline, CaReport, CaReportContent, CaReportRevision, CaRevisionSummary } from "@/types/ca";
 
 const base = (projectNumber: string) => `/api/ca/projects/${encodeURIComponent(projectNumber)}/reports`;
 const one = (projectNumber: string, reportId: string) => `${base(projectNumber)}/${encodeURIComponent(reportId)}`;
@@ -17,7 +17,13 @@ export async function fetchCaReport(
   return apiGet(one(projectNumber, reportId));
 }
 
-export type ReportPutBody = { draft: CaReportContent; clientUpdatedAt: string; createdAt: string };
+export type ReportPutBody = {
+  draft: CaReportContent;
+  clientUpdatedAt: string;
+  createdAt: string;
+  /** Only the first PUT's discipline is kept. */
+  discipline?: CaDiscipline;
+};
 
 /** Idempotent create-or-save of a draft; an older edit than the stored one is ignored. */
 export async function putCaReport(projectNumber: string, reportId: string, body: ReportPutBody): Promise<CaReport> {
@@ -40,6 +46,11 @@ export async function fetchCaRevision(
   projectNumber: string,
   reportId: string,
   revision: number,
-): Promise<{ revision: CaReportRevision; photoUrls: Record<string, string> }> {
+): Promise<{
+  revision: CaReportRevision;
+  photoUrls: Record<string, string>;
+  /** Drawing id → read URL, for the frozen Photo Locations floor plans. */
+  drawingUrls?: Record<string, string>;
+}> {
   return apiGet(`${one(projectNumber, reportId)}/revisions/${revision}`);
 }

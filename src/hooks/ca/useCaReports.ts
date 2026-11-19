@@ -8,12 +8,16 @@ import { getLocalDraft, listLocalDrafts, saveLocalDraft } from "@/lib/ca/offline
 import { onCaLocalChange } from "@/lib/ca/offline/events";
 import { reportState } from "@/lib/ca/reportContent";
 import { fetchCaReport, fetchCaReports } from "@/services/ca/reportService";
-import type { CaReport, CaReportContent, CaReportState, CaRevisionSummary } from "@/types/ca";
+import type { CaDiscipline, CaReport, CaReportContent, CaReportState, CaRevisionSummary } from "@/types/ca";
 
 export type CaReportListItem = {
   id: string;
   /** Assigned by the server; null until the report first syncs. */
   reportNumber: string | null;
+  /** Absent on reports started before disciplines existed. */
+  discipline?: CaDiscipline;
+  /** Who started the report (display name); absent on older reports. */
+  createdByName?: string;
   content: CaReportContent;
   state: CaReportState;
   latestRevision: number | null;
@@ -28,10 +32,17 @@ function preferLocal(local: LocalDraft | undefined, server: CaReport | undefined
   return local.syncState !== "synced" || local.clientUpdatedAt >= server.draftUpdatedAt;
 }
 
-/** Starts a report on this device (works offline) and returns its id. */
-export async function startCaReport(projectNumber: string, content: CaReportContent): Promise<string> {
+/**
+ * Starts a report on this device (works offline) and returns its id. The draft
+ * is saved and queued at once, so it survives the engineer leaving the page.
+ */
+export async function startCaReport(
+  projectNumber: string,
+  content: CaReportContent,
+  meta: { discipline?: CaDiscipline; createdByName?: string } = {},
+): Promise<string> {
   const id = newCaReportId();
-  await saveLocalDraft({ id, projectNumber, content, createdAt: new Date().toISOString() });
+  await saveLocalDraft({ id, projectNumber, content, createdAt: new Date().toISOString(), ...meta });
   return id;
 }
 
@@ -76,6 +87,8 @@ export function useCaReports(projectNumber: string) {
     return {
       id: r.id,
       reportNumber: r.reportNumber,
+      discipline: r.discipline ?? l?.discipline,
+      createdByName: r.createdByName ?? l?.createdByName,
       content: takeLocal ? l!.content : r.draft,
       state: takeLocal && l!.syncState !== "synced" && r.latestRevision !== null ? "revising" : reportState(r),
       latestRevision: r.latestRevision,
@@ -91,6 +104,8 @@ export function useCaReports(projectNumber: string) {
     items.push({
       id: l.id,
       reportNumber: null,
+      discipline: l.discipline,
+      createdByName: l.createdByName,
       content: l.content,
       state: "draft",
       latestRevision: null,
@@ -117,6 +132,8 @@ export function useCaReport(projectNumber: string, reportId: string) {
   const [serverState, setServerState] = useState<"loading" | "ok" | "missing" | "offline">("loading");
   // Set from callbacks (never during render); used when saving the first local copy.
   const serverCreatedAt = useRef<string | null>(null);
+  // Set alongside it: a first local copy of a report started elsewhere keeps its discipline and author.
+  const serverMeta = useRef<Pick<CaReport, "discipline" | "createdByName">>({});
 
   const readLocal = useCallback(
     () =>
@@ -131,6 +148,7 @@ export function useCaReport(projectNumber: string, reportId: string) {
       fetchCaReport(projectNumber, reportId).then(
         (result) => {
           serverCreatedAt.current = result.report.createdAt;
+          serverMeta.current = { discipline: result.report.discipline, createdByName: result.report.createdByName };
           setServer(result);
           setServerState("ok");
         },
@@ -164,6 +182,9 @@ export function useCaReport(projectNumber: string, reportId: string) {
         projectNumber,
         content: next,
         createdAt: existing?.createdAt ?? serverCreatedAt.current ?? new Date().toISOString(),
+        // Stored values win (saveLocalDraft keeps them); these fill a first copy.
+        discipline: serverMeta.current.discipline,
+        createdByName: serverMeta.current.createdByName,
       });
       setLocal(saved);
     },
@@ -176,6 +197,8 @@ export function useCaReport(projectNumber: string, reportId: string) {
     notFound: localRead && !local && serverState === "missing",
     content,
     version,
+    discipline: server?.report.discipline ?? local?.discipline,
+    createdByName: server?.report.createdByName ?? local?.createdByName,
     report: server?.report ?? null,
     revisions: server?.revisions ?? [],
     syncState: local?.syncState ?? (server ? "synced" : "pending"),

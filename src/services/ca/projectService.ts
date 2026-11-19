@@ -1,11 +1,8 @@
 "use client";
 
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/services/apiClient";
-import type {
-  CaProject,
-  CaSourceProject,
-  NewCaProjectInput,
-} from "@/types/ca";
+import type { CaSourceProjectsResult } from "@/lib/ca/sourceProjects";
+import type { CaProject, NewCaProjectInput } from "@/types/ca";
 
 const base = "/api/ca/projects";
 const one = (projectNumber: string) => `${base}/${encodeURIComponent(projectNumber)}`;
@@ -34,9 +31,10 @@ export async function deleteCaProject(projectNumber: string): Promise<void> {
 }
 
 /** Projects the upstream source offers; `source: null` = manual entry only. */
-export async function fetchCaSourceProjects(): Promise<{
-  source: CaSourceProject["source"] | null;
-  projects: CaSourceProject[];
-}> {
+/**
+ * Projects New Project can offer: from the CA application, or VantagePoint
+ * when it is down. Projects already created here are marked `alreadyCreated`.
+ */
+export async function fetchCaSourceProjects(): Promise<CaSourceProjectsResult> {
   return apiGet("/api/ca/source-projects");
 }

@@ -14,13 +14,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { LuCheck, LuChevronDown } from "react-icons/lu";
 
-import { APP_NAME } from "@/lib/branding";
 import { CA_HOME, CX_HOME, sectionForPath, type Section } from "@/lib/navigation";
 
 /**
  * The "Field Reports ⌄" control in the application header (CA_plan.pdf p.1).
  *
- * - The label opens CA Field Reports, the default experience.
+ * - The label names the active side ("CA Field Reports" / "CX Field
+ *   Reports") and opens that side's home.
  * - The chevron opens a menu to switch between CA Field Reports and CX Field
  *   Reports. The CX app keeps its own URLs (`/projects/...`).
  * - Page eyebrows ("CA Field Reports" / "CX Field Reports") say which side the
@@ -44,6 +44,7 @@ const SECTIONS: { key: Section; label: string; href: string; hint: string }[] = 
 
 export function FieldReportsMenu() {
   const active = sectionForPath(usePathname());
+  const current = SECTIONS.find((section) => section.key === active) ?? SECTIONS[0];
 
   return (
     <HStack gap={{ base: 1, sm: 2 }} minW="0">
@@ -53,10 +54,13 @@ export function FieldReportsMenu() {
         asChild
         size={{ base: "sm", sm: "md" }}
         fontFamily="ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
-        whiteSpace="nowrap"
+        truncate
+        minW="0"
         _hover={{ color: "brand.fg" }}
       >
-        <Link href={CA_HOME}>{APP_NAME}</Link>
+        <Link href={current.href} data-testid="field-reports-title">
+          {current.label}
+        </Link>
       </Heading>
 
       <Menu.Root positioning={{ placement: "bottom-start" }}>
@@ -67,7 +71,8 @@ export function FieldReportsMenu() {
             minH="44px"
             minW="44px"
             px="1"
-            aria-label={`Switch field reports. Currently ${active === "ca" ? "CA" : "CX"} Field Reports.`}
+            flexShrink={0}
+            aria-label={`Switch field reports. Currently ${current.label}.`}
           >
             <LuChevronDown />
           </Button>

@@ -51,7 +51,7 @@ export async function enqueue(kind: OutboxKind, entityId: string, projectNumber:
 export async function captureFiles(
   projectNumber: string,
   files: File[],
-  options: { pinId?: string; downscale?: Downscale } = {},
+  options: { pinId?: string; reportId?: string; downscale?: Downscale } = {},
 ): Promise<{ saved: string[]; failed: { name: string; error: string }[] }> {
   const downscale = options.downscale ?? downscaleImage;
   const db = await openCaDb();
@@ -71,6 +71,7 @@ export async function captureFiles(
         // Library photos carry their own date; camera captures are "now".
         takenAt: file.lastModified ? new Date(file.lastModified).toISOString() : now,
         ...(options.pinId ? { pinId: options.pinId } : {}),
+        ...(options.reportId ? { reportId: options.reportId } : {}),
         width: image.width,
         height: image.height,
         createdAt: now,

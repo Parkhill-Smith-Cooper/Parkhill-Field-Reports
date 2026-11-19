@@ -1,4 +1,15 @@
 import { isValidGeneratedId, isValidProjectNumber } from "@/lib/validation";
+import {
+  MAX_IMAGE_CHARS,
+  MAX_LINE_LENGTH,
+  MAX_LINES_PER_PAGE,
+  MAX_PAGES_PER_REQUEST,
+  MAX_SET_BLOCKS,
+  MAX_SET_PAGES,
+  MAX_SHEET_NAME,
+  MAX_SHEET_NUMBER,
+} from "@/lib/ca/sheetIndex";
+import { MAX_ZOOM, MIN_ZOOM } from "@/lib/ca/reportLocations";
 import { CA_ITEM_STATUSES, type CaReportContent } from "@/types/ca";
 
 /**
@@ -57,6 +68,9 @@ export function validatePhotoMeta(body: unknown): string | null {
   if (!isIsoDateTime(body.clientUpdatedAt)) return "Invalid edit time.";
   if (body.pinId !== undefined && body.pinId !== null && !isValidGeneratedId(body.pinId)) {
     return "Invalid pin id.";
+  }
+  if (body.reportId !== undefined && body.reportId !== null && !isValidGeneratedId(body.reportId)) {
+    return "Invalid report id.";
   }
   if (body.deleted !== undefined && !isBool(body.deleted)) return "Invalid photo state.";
   for (const key of ["width", "height"] as const) {
@@ -118,6 +132,58 @@ export function validateDrawingMeta(body: unknown): string | null {
   if (body.source !== "upload" && !isStr(body.externalRef, MAX_SHORT)) {
     return "An imported drawing needs its source reference.";
   }
+  if (body.drawingSetId !== undefined) {
+    if (body.source !== "upload" || body.fileType !== "pdf" || !isValidGeneratedId(body.drawingSetId)) {
+      return "Invalid drawing set.";
+    }
+  }
+  return null;
+}
+
+const isSheetText = (v: unknown, max: number): v is string => isStr(v, max);
+
+/** Body of `PUT .../drawing-sets/{setId}`: commits the uploaded blocks as the set. */
+export function validateDrawingSetCommit(body: unknown): string | null {
+  if (!isObj(body)) return "Drawing set details must be an object.";
+  if (!isStr(body.fileName, 260) || body.fileName.trim().length === 0) return "The file name is required.";
+  if (!/\.pdf$/i.test(body.fileName.trim())) return "Drawing sets must be PDF files.";
+  const blocks = body.blockCount;
+  if (!(Number.isInteger(blocks) && (blocks as number) > 0 && (blocks as number) <= MAX_SET_BLOCKS)) {
+    return "Invalid upload.";
+  }
+  const pages = body.pageCount;
+  if (!(Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= MAX_SET_PAGES)) {
+    return `Drawing sets can have up to ${MAX_SET_PAGES} pages.`;
+  }
+  if (!Array.isArray(body.sheets) || body.sheets.length !== pages) return "Include one sheet per page.";
+  for (const [i, sheet] of body.sheets.entries()) {
+    if (
+      !isObj(sheet) ||
+      sheet.page !== i + 1 ||
+      !isSheetText(sheet.sheetNumber, MAX_SHEET_NUMBER) ||
+      !isSheetText(sheet.sheetName, MAX_SHEET_NAME) ||
+      !["guess", "ai", "edited"].includes(sheet.naming as string)
+    ) {
+      return "Invalid sheet.";
+    }
+  }
+  // Optional: where an imported set came from. All or nothing.
+  if (body.source !== undefined || body.externalRef !== undefined || body.revisionLabel !== undefined) {
+    if (body.source !== "mock" && body.source !== "ca-app") return "Invalid drawing source.";
+    if (!isStr(body.externalRef, 300) || body.externalRef.trim().length === 0) return "Invalid drawing reference.";
+    if (body.revisionLabel !== undefined && !isStr(body.revisionLabel, 120)) return "Invalid revision label.";
+  }
+  return null;
+}
+
+/** Body of `PATCH .../drawing-sets/{setId}`: an engineer's correction of one sheet. */
+export function validateSetSheetEdit(body: unknown): string | null {
+  if (!isObj(body)) return "Request body must be an object.";
+  if (!(Number.isInteger(body.page) && (body.page as number) > 0 && (body.page as number) <= MAX_SET_PAGES)) {
+    return "Invalid page.";
+  }
+  if (!isSheetText(body.sheetNumber, MAX_SHEET_NUMBER)) return `Sheet numbers are ${MAX_SHEET_NUMBER} characters or fewer.`;
+  if (!isSheetText(body.sheetName, MAX_SHEET_NAME)) return `Sheet names are ${MAX_SHEET_NAME} characters or fewer.`;
   return null;
 }
 
@@ -207,6 +273,47 @@ export function validateReportContent(value: unknown): string | null {
         return "Invalid observation photo.";
       }
     }
+  }
+
+  if (c.locationZoom !== undefined && c.locationZoom !== null) {
+    const zoom = c.locationZoom;
+    if (!isObj(zoom) || Object.keys(zoom).length > MAX_ITEMS * 2) return "Invalid floor plan zoom.";
+    for (const [pinId, level] of Object.entries(zoom)) {
+      if (!isValidGeneratedId(pinId) || typeof level !== "number" || !(level >= MIN_ZOOM && level <= MAX_ZOOM)) {
+        return "Invalid floor plan zoom.";
+      }
+    }
+  }
+  return null;
+}
+
+/** Body of `POST .../sheet-names`: title-block text (or an image) for each page. */
+export function validateSheetNameRequest(body: unknown): string | null {
+  if (!isObj(body) || !Array.isArray(body.pages)) return "Include the pages to name.";
+  if (body.pages.length === 0 || body.pages.length > MAX_PAGES_PER_REQUEST) {
+    return `Send 1 to ${MAX_PAGES_PER_REQUEST} pages at a time.`;
+  }
+  const seen = new Set<number>();
+  for (const page of body.pages) {
+    if (!isObj(page)) return "Invalid page.";
+    if (!(Number.isInteger(page.page) && (page.page as number) > 0 && (page.page as number) <= 100_000)) {
+      return "Invalid page number.";
+    }
+    if (seen.has(page.page as number)) return "Each page may be sent once.";
+    seen.add(page.page as number);
+    if (
+      !Array.isArray(page.lines) ||
+      page.lines.length > MAX_LINES_PER_PAGE ||
+      !page.lines.every((line) => isStr(line, MAX_LINE_LENGTH + 10))
+    ) {
+      return "Invalid title-block text.";
+    }
+    if (page.image !== undefined) {
+      if (!isStr(page.image, MAX_IMAGE_CHARS) || !page.image.startsWith("data:image/jpeg;base64,")) {
+        return "Title-block images must be JPEG data URLs.";
+      }
+    }
+    if (page.lines.length === 0 && page.image === undefined) return "Each page needs text or an image.";
   }
   return null;
 }

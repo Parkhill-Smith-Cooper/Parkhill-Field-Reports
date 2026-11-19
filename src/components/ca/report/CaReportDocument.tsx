@@ -13,9 +13,18 @@ import { captureFiles } from "@/lib/ca/offline/photoStore";
 import { itemNumber } from "@/lib/ca/reportContent";
 import { formatLongDate, formatTime, move, photoRows } from "@/lib/ca/reportLayout";
 import { CA_STATUS_LABELS, hasDeficientItems, isDeficient } from "@/lib/ca/status";
-import { CA_ITEM_STATUSES, type CaItemPhoto, type CaItemStatus, type CaReportContent, type CaReportItem } from "@/types/ca";
+import {
+  CA_ITEM_STATUSES,
+  type CaItemPhoto,
+  type CaItemStatus,
+  type CaReportContent,
+  type CaReportItem,
+  type CaReportLocation,
+} from "@/types/ca";
 
 import { Editable, PhotoSourceMenu } from "./editing";
+import { LocationPages } from "./locations";
+import { photoDropProps } from "./photoDrag";
 
 const WEATHER = [
   ["clear", "Clear"],
@@ -37,12 +46,14 @@ const cssString = (value: string) => value.replace(/["\\\n\r]/g, " ");
 export type ReportEditing = {
   onChange: (next: CaReportContent) => void;
   projectNumber: string;
+  /** Photos taken from the report's photo boxes are filed under this report. */
+  reportId?: string;
   /** The project's photos, for "Choose from project photos". */
   photos: CaPhotoView[];
   pinNames: Map<string, string>;
 };
 
-type PickerTarget = { kind: "cover" } | { kind: "item"; itemId: string };
+type PickerTarget = { kind: "cover" } | { kind: "item"; itemId: string; replaceIndex?: number };
 
 /**
  * The Field Observation Report, rendered from the template's structure and
@@ -65,6 +76,7 @@ export function CaReportDocument({
   reportNumber,
   revision,
   dateIssued,
+  locations,
   editing,
 }: {
   content: CaReportContent;
@@ -75,6 +87,8 @@ export function CaReportDocument({
   revision: number | null;
   /** ISO time the shown revision was issued; null for a draft. */
   dateIssued: string | null;
+  /** The Photo Locations pages and how to show their floor plans. */
+  locations?: { list: CaReportLocation[]; drawingUrl: (drawingId: string) => string | null };
   editing?: ReportEditing;
 }) {
   const [picker, setPicker] = useState<PickerTarget | null>(null);
@@ -96,7 +110,9 @@ export function CaReportDocument({
   async function addFiles(target: PickerTarget, files: File[]) {
     if (!ed) return;
     try {
-      const { saved, failed } = await captureFiles(ed.projectNumber, target.kind === "cover" ? files.slice(0, 1) : files);
+      const { saved, failed } = await captureFiles(ed.projectNumber, target.kind === "cover" ? files.slice(0, 1) : files, {
+        reportId: ed.reportId,
+      });
       for (const f of failed) notifyError(`Could not save ${f.name}`, new Error(f.error));
       if (saved.length) place(target, saved);
     } catch (error) {
@@ -108,12 +124,14 @@ export function CaReportDocument({
     if (target.kind === "cover") return set("coverPhotoId", ids[0]);
     const item = content.items.find((i) => i.id === target.itemId);
     if (!item) return;
-    const existing = new Set(item.photos.map((p) => p.photoId));
+    const at = target.replaceIndex;
+    // Dropped on a filled box: the photos take that box's place.
+    const kept = at === undefined ? item.photos : item.photos.filter((_, i) => i !== at);
+    const existing = new Set(kept.map((p) => p.photoId));
+    const added = [...new Set(ids)].filter((id) => !existing.has(id)).map((id) => ({ photoId: id, caption: captionOf(id) }));
+    if (!added.length) return;
     setItem(item.id, {
-      photos: [
-        ...item.photos,
-        ...ids.filter((id) => !existing.has(id)).map((id) => ({ photoId: id, caption: captionOf(id) })),
-      ],
+      photos: at === undefined ? [...kept, ...added] : [...kept.slice(0, at), ...added, ...kept.slice(at)],
     });
   }
 
@@ -210,7 +228,12 @@ export function CaReportDocument({
                       onPickExisting={() => setPicker({ kind: "cover" })}
                       onRemove={content.coverPhotoId ? () => set("coverPhotoId", undefined) : undefined}
                     >
-                      <button type="button" className={`pphoto tap${coverUrl ? " has" : ""}`} data-testid="ca-cover-box">
+                      <button
+                        type="button"
+                        className={`pphoto tap${coverUrl ? " has" : ""}`}
+                        data-testid="ca-cover-box"
+                        {...photoDropProps((ids) => set("coverPhotoId", ids[0]))}
+                      >
                         {coverUrl ? (
                           // eslint-disable-next-line @next/next/no-img-element -- print fidelity
                           <img src={coverUrl} alt="Project photo" />
@@ -425,6 +448,7 @@ export function CaReportDocument({
                           move: (delta) => set("items", move(content.items, index, delta)),
                           remove: () => set("items", content.items.filter((i) => i.id !== item.id)),
                           addFiles: (files) => void addFiles({ kind: "item", itemId: item.id }, files),
+                          dropPhotos: (ids, replaceIndex) => place({ kind: "item", itemId: item.id, replaceIndex }, ids),
                           pickExisting: () => setPicker({ kind: "item", itemId: item.id }),
                         }
                       }
@@ -474,6 +498,16 @@ export function CaReportDocument({
                     })}
                   </div>
 
+                  {locations && (
+                    <LocationPages
+                      locations={locations.list}
+                      zoom={content.locationZoom ?? {}}
+                      photoUrl={photoUrl}
+                      drawingUrl={locations.drawingUrl}
+                      onZoom={ed && ((pinId, zoom) => set("locationZoom", { ...content.locationZoom, [pinId]: zoom }))}
+                    />
+                  )}
+
                   <div className="screen-footer screen-only">
                     <span>Parkhill Field Observation Report · Date Issued: {issued ? issuedLabel : "Not issued (draft)"}</span>
                     <b>Building Community</b>
@@ -507,6 +541,8 @@ type ItemEditing = {
   remove: () => void;
   addFiles: (files: File[]) => void;
   pickExisting: () => void;
+  /** Photos dragged from the photo panel; onto a filled box, they replace it. */
+  dropPhotos: (photoIds: string[], replaceIndex?: number) => void;
 };
 
 type Cell = { kind: "photo"; photo: CaItemPhoto; index: number } | { kind: "add" };
@@ -538,7 +574,7 @@ function Item({
     editing && (
       <figure key={key} className={`ph${screenOnly ? " screen-only" : ""}`}>
         <PhotoSourceMenu label={`Add a photo to ${label}`} onFiles={editing.addFiles} onPickExisting={editing.pickExisting}>
-          <button type="button" className="photo tap add" data-testid="ca-add-photo-box">
+          <button type="button" className="photo tap add" data-testid="ca-add-photo-box" {...photoDropProps((ids) => editing.dropPhotos(ids))}>
             <LuPlus className="screen-only" aria-hidden /> Photo
           </button>
         </PhotoSourceMenu>
@@ -552,7 +588,7 @@ function Item({
     return (
       <figure key={photo.photoId} className="ph">
         {url ? (
-          <div className="photo has">
+          <div className="photo has" {...(editing && photoDropProps((ids) => editing.dropPhotos(ids, pi)))}>
             {/* eslint-disable-next-line @next/next/no-img-element -- print fidelity */}
             <img src={url} alt={`${label} photo`} />
             {editing && (
@@ -588,7 +624,7 @@ function Item({
           </div>
         ) : (
           // Deleted, or not on this device yet: still removable from the report.
-          <div className="photo has">
+          <div className="photo has" {...(editing && photoDropProps((ids) => editing.dropPhotos(ids, pi)))}>
             Photo not available
             {editing && (
               <div className="ph-tools screen-only">

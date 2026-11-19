@@ -2,15 +2,14 @@ import { CA_HOME } from "@/lib/navigation";
 
 /** URL builders for CA screens, so links agree with the route tree by construction. */
 
+/**
+ * A project's pages. `reports` is the project home (reports grouped by
+ * discipline). `capture` and `route` only redirect there now: those steps
+ * live inside each report (`caReportPath(..., step)`).
+ */
 export type CaProjectTab = "capture" | "reports" | "route";
 
-export const CA_PROJECT_TABS: { key: CaProjectTab; label: string }[] = [
-  { key: "capture", label: "Capture" },
-  { key: "reports", label: "Reports" },
-  { key: "route", label: "Site Route" },
-];
-
-export function caProjectPath(projectNumber: string, tab: CaProjectTab = "capture"): string {
+export function caProjectPath(projectNumber: string, tab: CaProjectTab = "reports"): string {
   return `${CA_HOME}/${encodeURIComponent(projectNumber)}/${tab}`;
 }
 
@@ -24,8 +23,26 @@ export function caProjectPath(projectNumber: string, tab: CaProjectTab = "captur
  * `history.pushState` (`caNavigate`), which Next.js syncs with
  * `useSearchParams` without a server round trip.
  */
-export function caReportPath(projectNumber: string, reportId: string): string {
-  return `${caProjectPath(projectNumber, "reports")}?report=${encodeURIComponent(reportId)}`;
+export type CaReportStep = "capture" | "report" | "route";
+
+export const CA_REPORT_STEPS: { key: CaReportStep; label: string }[] = [
+  { key: "capture", label: "Capture" },
+  { key: "report", label: "Report" },
+  { key: "route", label: "Site Route" },
+];
+
+export function isCaReportStep(value: unknown): value is CaReportStep {
+  return value === "capture" || value === "report" || value === "route";
+}
+
+/**
+ * One report, at one of its steps. With no step it opens the Report step.
+ * Capture and Site Route are scoped to the report: photos taken there belong
+ * to it.
+ */
+export function caReportPath(projectNumber: string, reportId: string, step?: CaReportStep): string {
+  const path = `${caProjectPath(projectNumber, "reports")}?report=${encodeURIComponent(reportId)}`;
+  return step && step !== "report" ? `${path}&step=${step}` : path;
 }
 
 /** The printable report: the draft, or an issued revision (`rev`). */

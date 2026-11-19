@@ -4,11 +4,13 @@ import { Box, Button, HStack, IconButton, Menu, NativeSelect, Portal, Text } fro
 import { LuCloudOff, LuEllipsisVertical, LuPlus } from "react-icons/lu";
 
 import type { CaDrawingView } from "@/hooks/ca/useCaDrawings";
+import { sheetLabel } from "@/lib/ca/sheetIndex";
 
 import { CaSourceTag } from "./CaSourceTag";
 
+/** `A-101 - Level 1 Floor Plan`, as sheets are named everywhere in Capture. */
 export const drawingLabel = (d: Pick<CaDrawingView, "sheetNumber" | "title">) =>
-  [d.sheetNumber, d.title].filter(Boolean).join(" · ");
+  sheetLabel({ sheetNumber: d.sheetNumber, sheetName: d.title });
 
 /**
  * Chooses which sheet is shown. Superseded sheets stay selectable (their pins

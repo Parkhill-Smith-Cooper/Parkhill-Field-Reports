@@ -77,10 +77,54 @@ export type CaDrawing = {
   height: number;
   source: "upload" | "ca-app" | "mock";
   externalRef?: string;
+  /** The uploaded drawing set this sheet was taken from (`page` is its page). */
+  drawingSetId?: string;
   /** Superseded drawings stay so their pins remain meaningful. */
   isCurrent: boolean;
   uploadedAt: string;
   uploadedBy: string;
+};
+
+/** How a set sheet's number and name were set. Edited values are never overwritten. */
+export type CaSheetNaming = "guess" | "ai" | "edited";
+
+/** One page of an uploaded drawing set. */
+export type CaSetSheet = {
+  /** 1-based page in the PDF. */
+  page: number;
+  sheetNumber: string;
+  sheetName: string;
+  naming: CaSheetNaming;
+};
+
+/**
+ * A full drawing-set PDF uploaded to the project, listed as its sheets for
+ * engineers on any device to choose floor plans from. The PDF is stored once
+ * in the CA file store; each sheet an engineer adds becomes a `CaDrawing`
+ * (a rendered sheet image). Removing a set hides it; the file is kept, as
+ * drawings made from it may still be traced back to it.
+ */
+export type CaDrawingSet = {
+  id: string;
+  projectNumber: string;
+  fileName: string;
+  /** Path of the PDF within the CA file store. */
+  filePath: string;
+  sizeBytes: number;
+  pageCount: number;
+  sheets: CaSetSheet[];
+  uploadedAt: string;
+  uploadedBy: string;
+  /**
+   * Where an imported set came from (absent for a PDF uploaded by hand), and
+   * the source's id for that version, so it is offered as "Added" afterwards.
+   */
+  source?: "mock" | "ca-app";
+  externalRef?: string;
+  revisionLabel?: string;
+  removed?: boolean;
+  removedAt?: string;
+  removedBy?: string;
 };
 
 /**
@@ -91,6 +135,11 @@ export type CaDrawing = {
 export type CaPhoto = {
   id: string;
   projectNumber: string;
+  /**
+   * The report the photo was captured for. Set on first sync and never
+   * changed. Absent on photos captured before reports had their own steps.
+   */
+  reportId?: string;
   /** Path within the CA file store. */
   filePath: string;
   fileName: string;
@@ -212,7 +261,52 @@ export type CaReportContent = {
   items: CaReportItem[];
   comments: string;
   distribution: CaDistribution;
+  /**
+   * Zoom of each location page's floor-plan inset, by pin id. 1 shows the
+   * whole sheet; higher values zoom in around the pin. Absent means 1.
+   */
+  locationZoom?: Record<string, number>;
 };
+
+/**
+ * One "Photo Locations" section of a report: a pin, where it is on its
+ * floor plan, and the report's photos taken there. Derived from the draft
+ * and the project's pins and drawings; frozen into a revision at issue time.
+ */
+export type CaReportLocation = {
+  pinId: string;
+  /** The pin's name, e.g. "Mech room 110" or "Pin 3". */
+  title: string;
+  /** The sheet, e.g. "A-101 · First Floor Plan". */
+  subtitle: string;
+  /** The pin's floor plan, or null when it is not available. */
+  drawing: { id: string; filePath: string; width: number; height: number } | null;
+  /** Pin position as fractions (0-1) of the sheet. */
+  x: number;
+  y: number;
+  /** In report order, with the captions used in the report. */
+  photos: CaItemPhoto[];
+};
+
+/**
+ * Parkhill disciplines. A project's reports are grouped by discipline, and
+ * each discipline will later get its own variations of the report.
+ */
+export const CA_DISCIPLINES = ["architecture", "civil", "mp", "electrical", "structural"] as const;
+
+export type CaDiscipline = (typeof CA_DISCIPLINES)[number];
+
+export const CA_DISCIPLINE_LABELS: Record<CaDiscipline, string> = {
+  architecture: "Architecture",
+  civil: "Civil",
+  mp: "MP",
+  electrical: "Electrical",
+  structural: "Structural",
+};
+
+export function isCaDiscipline(value: unknown): value is CaDiscipline {
+  return typeof value === "string" && (CA_DISCIPLINES as readonly string[]).includes(value);
+}
 
 /**
  * A report and its working draft. Issued versions are separate, immutable
@@ -223,6 +317,8 @@ export type CaReport = {
   projectNumber: string;
   /** Per-project sequence, zero-padded: "001". */
   reportNumber: string;
+  /** Set when the report is started; never changed. Absent on older reports. */
+  discipline?: CaDiscipline;
   draft: CaReportContent;
   /** `null` until first issued. Rev 0 is the first issue. */
   latestRevision: number | null;
@@ -235,7 +331,10 @@ export type CaReport = {
    */
   draftUpdatedAt: string;
   createdAt: string;
+  /** The UPN of the engineer who started the report. */
   createdBy: string;
+  /** Their display name, for lists. Absent on older reports. */
+  createdByName?: string;
   updatedAt: string;
 };
 
@@ -259,6 +358,8 @@ export type CaReportRevision = {
   /** photoId → file path, frozen at issue time. */
   photoPaths: Record<string, string>;
   contentHash: string;
+  /** The Photo Locations pages, frozen at issue time. Absent on older revisions. */
+  locations?: CaReportLocation[];
   /**
    * The `draftUpdatedAt` of the draft this revision froze. Lets marking tell
    * whether the stored draft has moved on since (edits made after the issue
@@ -271,3 +372,21 @@ export type CaRevisionSummary = Pick<
   CaReportRevision,
   "id" | "revision" | "dateIssued" | "issuedBy"
 >;
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+/** A report as a nav-bar search result. */
+export type CaSearchReport = {
+  id: string;
+  projectNumber: string;
+  projectName: string;
+  reportNumber: string;
+  discipline?: CaDiscipline;
+  createdByName?: string;
+  state: CaReportState;
+  updatedAt: string;
+};
+
+export type CaSearchResult = { projects: CaProject[]; reports: CaSearchReport[] };

@@ -16,6 +16,8 @@ export type CaPhotoView = {
   fileName: string;
   takenAt: string;
   pinId?: string;
+  /** The report the photo was captured for; absent on older photos. */
+  reportId?: string;
   width?: number;
   height?: number;
   syncState: SyncState;
@@ -114,6 +116,7 @@ export function useCaPhotos(projectNumber: string) {
       fileName: s.fileName,
       takenAt: s.takenAt,
       pinId: s.pinId,
+      reportId: s.reportId,
       width: s.width,
       height: s.height,
       syncState: "synced",
@@ -134,6 +137,7 @@ export function useCaPhotos(projectNumber: string) {
       fileName: l.fileName,
       takenAt: l.takenAt,
       pinId: serverIsNewer ? s.pinId : l.pinId,
+      reportId: l.reportId ?? s?.reportId,
       width: l.width,
       height: l.height,
       syncState: l.syncState,
@@ -155,6 +159,7 @@ export function useCaPhotos(projectNumber: string) {
         fileName: s.fileName,
         takenAt: s.takenAt,
         pinId: s.pinId,
+        ...(s.reportId ? { reportId: s.reportId } : {}),
         width: s.width,
         height: s.height,
         createdAt: s.createdAt,
@@ -175,6 +180,7 @@ export function useCaPhotos(projectNumber: string) {
         fileName: s.fileName,
         takenAt: s.takenAt,
         pinId: s.pinId,
+        ...(s.reportId ? { reportId: s.reportId } : {}),
         width: s.width,
         height: s.height,
         createdAt: s.createdAt,

@@ -31,6 +31,8 @@ export function CaPinSheet(props: {
   projectNumber: string;
   pin: CaPinView | null;
   number: number;
+  /** Photos taken in the sheet are filed under this report. */
+  reportId?: string;
   /** All project photos; the sheet shows this pin's. */
   photos: CaPhotoView[];
   onClose: () => void;
@@ -60,6 +62,7 @@ function PinBody({
   projectNumber,
   pin,
   number,
+  reportId,
   photos,
   onClose,
   onSave,
@@ -107,7 +110,7 @@ function PinBody({
 
           {/* Rapid capture is left to the Capture tab: its full-screen camera
               cannot sit inside this sheet. */}
-          <CaCaptureBar projectNumber={projectNumber} pinId={pin.id} allowRapid={false} />
+          <CaCaptureBar projectNumber={projectNumber} pinId={pin.id} reportId={reportId} allowRapid={false} />
 
           <FormField label="Pin label" helperText={`Shown on the drawing and in reports. Leave blank for “Pin ${number}”.`}>
             <Input size="lg" value={label} maxLength={120} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. Mech room 110" />

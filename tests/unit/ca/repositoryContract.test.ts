@@ -82,6 +82,43 @@ describe.each(implementations)("CA repository contract: %s", (_name, make) => {
     expect((await repo.reports.list(PROJECT)).map((r) => r.reportNumber)).toEqual(["002", "001"]);
   });
 
+  it("reports: discipline and author name are stored with the report", async () => {
+    const repo = await withProject();
+    const created = await repo.reports.create({ ...reportInput("carep_d"), discipline: "civil", createdByName: "Brett Rodgers" });
+    expect(created).toMatchObject({ discipline: "civil", createdByName: "Brett Rodgers", reportNumber: "001" });
+    // Saving the draft never changes them.
+    await repo.reports.saveDraft(PROJECT, created.id, { ...created.draft, comments: "x" }, "2026-07-16T00:00:00.000Z");
+    expect(await repo.reports.get(PROJECT, created.id)).toMatchObject({ discipline: "civil", createdByName: "Brett Rodgers" });
+  });
+
+  it("reports: search across projects by number, author, discipline or project", async () => {
+    const repo = await withProject();
+    await repo.projects.create({ projectNumber: "MOCK-2", name: "Fire Station", source: "manual" }, "x");
+    await repo.reports.create({ ...reportInput("carep_s1"), discipline: "civil", createdByName: "Brett Rodgers" });
+    await repo.reports.create({
+      ...reportInput("carep_s2"),
+      projectNumber: "MOCK-2",
+      discipline: "electrical",
+      createdByName: "Ana Diaz",
+      updatedAt: "2026-07-20T00:00:00.000Z",
+    });
+    const ids = async (q: string) => (await repo.reports.search(q, 20)).map((r) => r.id);
+    expect(await ids("brett")).toEqual(["carep_s1"]);
+    expect(await ids("electrical")).toEqual(["carep_s2"]);
+    expect(await ids("mock-2")).toEqual(["carep_s2"]);
+    // Both are report 001 in their project; newest activity first.
+    expect(await ids("001")).toEqual(["carep_s2", "carep_s1"]);
+    // The limit keeps the newest, not whichever came first.
+    expect((await repo.reports.search("001", 1)).map((r) => r.id)).toEqual(["carep_s2"]);
+    expect(await ids("nobody")).toEqual([]);
+  });
+
+  it("photos: the report a photo was captured for is stored", async () => {
+    const repo = await withProject();
+    await repo.photos.upsert(photo("caph_r", { reportId: "carep_1" }));
+    expect((await repo.photos.get(PROJECT, "caph_r"))?.reportId).toBe("carep_1");
+  });
+
   it("issuing: Rev 0 then Rev 1; revisions are create-only and unchanged by later edits", async () => {
     const repo = await withProject();
     await repo.photos.upsert(photo("caph_1"));
@@ -127,5 +164,49 @@ describe.each(implementations)("CA repository contract: %s", (_name, make) => {
     await repo.drawings.upsert({ ...drawing, isCurrent: false });
     expect(await repo.drawings.get(PROJECT, "cadwg_1")).toMatchObject({ isCurrent: false, title: "Level 1" });
     expect(await repo.drawings.list(PROJECT)).toHaveLength(1);
+  });
+
+  it("drawing sets: create-only, atomic sheet updates, removal is a tombstone", async () => {
+    const repo = await withProject();
+    const set = {
+      id: "caset_1",
+      projectNumber: PROJECT,
+      fileName: "CD Set.pdf",
+      filePath: `${PROJECT}/drawing-sets/caset_1.pdf`,
+      sizeBytes: 1234,
+      pageCount: 2,
+      sheets: [
+        { page: 1, sheetNumber: "G-001", sheetName: "", naming: "guess" as const },
+        { page: 2, sheetNumber: "", sheetName: "", naming: "guess" as const },
+      ],
+      uploadedAt: "2026-11-17T10:00:00.000Z",
+      uploadedBy: "eng",
+    };
+    await repo.drawingSets.create(set);
+    // A retried create returns what is stored and changes nothing.
+    expect(await repo.drawingSets.create({ ...set, fileName: "other.pdf" })).toMatchObject({ fileName: "CD Set.pdf" });
+
+    await Promise.all([
+      repo.drawingSets.updateSheets(PROJECT, "caset_1", (sheets) =>
+        sheets.map((s) => (s.page === 1 ? { ...s, sheetName: "Cover Sheet", naming: "ai" as const } : s)),
+      ),
+      repo.drawingSets.updateSheets(PROJECT, "caset_1", (sheets) =>
+        sheets.map((s) => (s.page === 2 ? { ...s, sheetNumber: "A-101", naming: "edited" as const } : s)),
+      ),
+    ]);
+    const stored = await repo.drawingSets.get(PROJECT, "caset_1");
+    expect(stored?.sheets).toEqual([
+      { page: 1, sheetNumber: "G-001", sheetName: "Cover Sheet", naming: "ai" },
+      { page: 2, sheetNumber: "A-101", sheetName: "", naming: "edited" },
+    ]);
+    expect(stored).not.toHaveProperty("type");
+    expect(await repo.drawingSets.updateSheets(PROJECT, "caset_missing", (s) => s)).toBeNull();
+
+    // Sets do not show up as drawings.
+    expect(await repo.drawings.list(PROJECT)).toEqual([]);
+
+    expect(await repo.drawingSets.remove(PROJECT, "caset_1", "eng")).toMatchObject({ removed: true, removedBy: "eng" });
+    expect((await repo.drawingSets.list(PROJECT)).map((s) => s.removed)).toEqual([true]);
+    expect(await repo.drawingSets.remove(PROJECT, "caset_missing", "eng")).toBeNull();
   });
 });

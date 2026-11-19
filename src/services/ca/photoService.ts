@@ -14,7 +14,7 @@ export async function fetchCaPhotos(projectNumber: string): Promise<CaPhotoWithU
 
 export type PhotoMeta = Pick<
   CaPhoto,
-  "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "width" | "height" | "deleted"
+  "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "reportId" | "width" | "height" | "deleted"
 >;
 
 /**

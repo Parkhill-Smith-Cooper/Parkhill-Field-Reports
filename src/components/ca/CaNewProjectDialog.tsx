@@ -8,8 +8,8 @@ import {
   Dialog,
   Input,
   Portal,
-  SegmentGroup,
   Stack,
+  Text,
   useFilter,
   useListCollection,
 } from "@chakra-ui/react";
@@ -23,6 +23,7 @@ import {
   createCaProject,
   fetchCaSourceProjects,
 } from "@/services/ca/projectService";
+import type { CaSourceProjectOffer } from "@/lib/ca/sourceProjects";
 import type { CaProject, CaSourceProject } from "@/types/ca";
 
 const SOURCE_NAMES: Record<CaSourceProject["source"], string> = {
@@ -35,11 +36,17 @@ const optionLabel = (p: CaSourceProject) => `${p.projectNumber} - ${p.name}`;
 
 type Mode = "source" | "manual";
 
+/** Shown on projects that already exist in Field Reports. */
+const ALREADY_CREATED_TIP = "Already created in Field Reports";
+
 /**
- * Creates a CA project, either picked from the configured upstream source
- * (the CA application once connected; mock or VantagePoint until then) or
- * entered by hand. Manual entry is always available, so a missing or broken
- * upstream connection never blocks field work.
+ * Creates a CA project picked from the CA application, the primary source.
+ * When the CA application cannot be reached the list comes from VantagePoint
+ * instead, with a notice. Projects that already exist here stay in the list,
+ * greyed out with a tip, so nobody wonders where theirs went.
+ *
+ * Manual entry is offered only when no source answers, so a broken upstream
+ * connection never blocks field work.
  */
 export function CaNewProjectDialog({
   onCreated,
@@ -51,16 +58,18 @@ export function CaNewProjectDialog({
   const [loading, setLoading] = useState(false);
   const [sourceKind, setSourceKind] = useState<CaSourceProject["source"] | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<CaSourceProject | null>(null);
+  const [fellBackFrom, setFellBackFrom] = useState<CaSourceProject["source"] | null>(null);
+  const [selected, setSelected] = useState<CaSourceProjectOffer | null>(null);
   const [manual, setManual] = useState({ projectNumber: "", name: "", client: "" });
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const { contains } = useFilter({ sensitivity: "base" });
-  const { collection, filter, set } = useListCollection<CaSourceProject>({
+  const { collection, filter, set } = useListCollection<CaSourceProjectOffer>({
     initialItems: [],
     itemToString: optionLabel,
     itemToValue: (p) => p.projectNumber,
+    isItemDisabled: (p) => p.alreadyCreated,
     filter: contains,
     limit: 50,
   });
@@ -70,13 +79,14 @@ export function CaNewProjectDialog({
     setMode("source");
     setLoading(true);
     setSourceError(null);
+    setFellBackFrom(null);
     try {
       const result = await fetchCaSourceProjects();
       setSourceKind(result.source);
+      setFellBackFrom(result.fellBackFrom ?? null);
       set(result.projects);
-      // Only force manual entry when there is no source. Never switch back to
-      // "source": the engineer may already have chosen "Enter manually" while
-      // the list was loading, and their typing must not disappear.
+      if (result.notice && !result.source) setSourceError(result.notice);
+      // Manual entry only when no source answered.
       if (!result.source) setMode("manual");
     } catch (error) {
       // The upstream feed failing is not a reason to stop: offer manual entry.
@@ -154,23 +164,16 @@ export function CaNewProjectDialog({
 
             <Dialog.Body>
               <Stack gap="4">
-                {sourceKind && (
-                  <SegmentGroup.Root
-                    value={mode}
-                    onValueChange={(e) => setMode(e.value as Mode)}
-                    size="lg"
-                    width="full"
-                  >
-                    <SegmentGroup.Indicator />
-                    <SegmentGroup.Items
-                      flex="1"
-                      justifyContent="center"
-                      items={[
-                        { value: "source", label: "Pick a project" },
-                        { value: "manual", label: "Enter manually" },
-                      ]}
-                    />
-                  </SegmentGroup.Root>
+                {fellBackFrom && sourceKind && (
+                  <Alert.Root status="info" size="sm" data-testid="ca-source-fallback">
+                    <Alert.Indicator />
+                    <Alert.Content>
+                      <Alert.Description>
+                        {SOURCE_NAMES[fellBackFrom].replace(/^the /, "The ")} could not be reached, so these projects
+                        come from {SOURCE_NAMES[sourceKind]}.
+                      </Alert.Description>
+                    </Alert.Content>
+                  </Alert.Root>
                 )}
 
                 {sourceError && (
@@ -186,7 +189,7 @@ export function CaNewProjectDialog({
                   <FormField
                     label="Project"
                     required
-                    helperText={`Search ${SOURCE_NAMES[sourceKind]} by project number or name.`}
+                    helperText={`Search ${SOURCE_NAMES[sourceKind]} by project number or name. Greyed-out projects already exist here.`}
                   >
                     <Combobox.Root
                       collection={collection}
@@ -213,8 +216,21 @@ export function CaNewProjectDialog({
                         <Combobox.Content>
                           <Combobox.Empty>No matching projects</Combobox.Empty>
                           {collection.items.map((p) => (
-                            <Combobox.Item item={p} key={p.projectNumber}>
-                              <Combobox.ItemText>{optionLabel(p)}</Combobox.ItemText>
+                            <Combobox.Item
+                              item={p}
+                              key={p.projectNumber}
+                              title={p.alreadyCreated ? ALREADY_CREATED_TIP : undefined}
+                              data-already-created={p.alreadyCreated || undefined}
+                              _disabled={{ opacity: 0.5, cursor: "not-allowed" }}
+                            >
+                              <Stack gap="0">
+                                <Combobox.ItemText>{optionLabel(p)}</Combobox.ItemText>
+                                {p.alreadyCreated && (
+                                  <Text fontSize="xs" color="fg.muted">
+                                    {ALREADY_CREATED_TIP}
+                                  </Text>
+                                )}
+                              </Stack>
                               <Combobox.ItemIndicator />
                             </Combobox.Item>
                           ))}

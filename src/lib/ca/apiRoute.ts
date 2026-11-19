@@ -12,6 +12,7 @@ import { isValidProjectNumber } from "@/lib/validation";
  *   and offers the manual alternative.
  * - `CaConflictError` / `RevisionAlreadyExistsError` → 409 with its message.
  * - `MissingPhotoError` → 422 (a photo in the report has not synced yet).
+ * - `MissingBlockError` → 422 (a drawing-set upload is incomplete).
  * - A bad `CA_*` setting → 500 naming the variable, like a missing CX one.
  *
  * Everything else falls through to `handleRoute`: logged, generic 500.
@@ -34,7 +35,7 @@ export function caRoute(
       ) {
         return apiError(error.message, 409);
       }
-      if (isCaError(error, "MissingPhotoError")) {
+      if (isCaError(error, "MissingPhotoError") || isCaError(error, "MissingBlockError")) {
         return apiError(error.message, 422);
       }
       if (error instanceof Error && /^Invalid CA_[A-Z_]+=/.test(error.message)) {

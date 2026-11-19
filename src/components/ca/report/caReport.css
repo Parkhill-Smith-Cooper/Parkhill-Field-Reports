@@ -428,6 +428,93 @@
   white-space: pre-line;
 }
 
+/* Photo Locations: extra pages, one section per pin, with the floor plan in
+   the section's top-right corner. */
+.ca-report .locs {
+  break-before: page;
+}
+.ca-report .locs > h3 {
+  margin-top: 0;
+}
+.ca-report .loc {
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+  padding: 0.13in 0.17in 0.15in;
+  margin-top: 0.15in;
+  break-inside: avoid-page;
+}
+.ca-report .loc.long {
+  break-inside: auto;
+}
+.ca-report .loc .keep {
+  break-inside: avoid;
+}
+.ca-report .loc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.2in;
+  margin-bottom: 0.14in;
+}
+.ca-report .loc-text {
+  min-width: 0;
+}
+.ca-report .loc-k {
+  font-size: 6.5pt;
+  font-weight: bold;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #c8102e;
+}
+.ca-report .loc-title {
+  font-size: 11pt;
+  font-weight: bold;
+  margin-top: 2px;
+}
+.ca-report .loc-sub,
+.ca-report .loc-n {
+  font-size: 7.5pt;
+  color: #777;
+  margin-top: 3px;
+}
+.ca-report .loc-plan {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid #ccc;
+  background: #fafafa;
+}
+.ca-report .loc-plan img {
+  position: absolute;
+  max-width: none;
+  max-height: none;
+  user-select: none;
+}
+.ca-report .loc-pin {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: #c8102e;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #c8102e, 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.ca-report .loc-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 7pt;
+  color: #aaa;
+  letter-spacing: 0.1em;
+}
+.ca-report .muted-cap {
+  font-style: italic;
+  color: #bbb;
+}
+
 /* Distribution */
 .ca-report .dist {
   border-top: 1.5px solid #c8102e;
@@ -611,6 +698,16 @@
   border-color: #c8102e;
   color: #c8102e;
   background: #fdf1f3;
+}
+/* Photos dragged from the photo panel over a box (only while dragging). */
+.ca-report.editing .drop-over {
+  outline: 3px dashed #c8102e;
+  outline-offset: 2px;
+  background: #fdf1f3;
+  color: #c8102e;
+}
+.ca-report.editing .photo.has.drop-over img {
+  opacity: 0.55;
 }
 .ca-report button.pphoto.has {
   padding: 0;
@@ -796,4 +893,57 @@
 .ca-report-sheet.compact .ttl {
   letter-spacing: 0.12em;
   white-space: normal;
+}
+
+/* Zooming a location's floor plan while editing (never printed). */
+.ca-report .loc-plan.tap {
+  cursor: zoom-in;
+}
+.ca-report .loc-plan.tap:hover,
+.ca-report .loc-plan.tap:focus-visible {
+  outline: 2px solid #c8102e;
+  outline-offset: 2px;
+}
+.ca-report .loc-plan.active {
+  cursor: default;
+  outline: 2px solid #c8102e;
+  outline-offset: 2px;
+}
+.ca-report .loc-hint {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 7pt;
+  color: #c8102e;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.ca-report .loc-plan.tap:hover .loc-hint,
+.ca-report .loc-plan.tap:focus-visible .loc-hint {
+  opacity: 1;
+}
+.ca-report .loc-zoom {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ca-report .loc-zoom .icon-btn {
+  width: 28px;
+  height: 28px;
+}
+.ca-report .loc-level {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 8pt;
+  font-weight: bold;
+}
+.ca-report-sheet.compact .loc-head {
+  flex-wrap: wrap;
 }

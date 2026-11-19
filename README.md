@@ -61,47 +61,70 @@ Built from `CA_plan.pdf` (navigation and workflow) and *Field Observation
 Report – Template.html* (report format).
 
 > **Status.** The front end, workflow, offline sync and API are complete and
-> tested in **mock mode**. Connecting real data (Cosmos/Blob, the CA
-> application's projects and drawing sets) is outstanding. See
+> tested in **mock mode**. Projects and drawing sets are connected to the CA
+> application (parkhill-ccr); running on real Cosmos/Blob is outstanding. See
 > [Outstanding work for the backend owner](#outstanding-work-for-the-backend-owner)
 > and [docs/ca-integration-contracts.md](docs/ca-integration-contracts.md).
 
 ### Navigation
 
 ```
-Sign in ─▶ /field-reports  (CA projects)  ──▶  project
-                │                                 ├─ Capture     floor plans + pins, photos (default tab)
-   "Field Reports ⌄" switcher                     ├─ Reports     list ▸ editor ▸ print / issued revisions
-                └─▶ /projects  (CX, unchanged)    └─ Site Route  route from pins + photo times; Start Tracking (placeholder)
+Sign in ─▶ /field-reports  (CA projects)  ──▶  project: reports grouped by discipline
+                │                                 Architecture · Civil · MP · Electrical · Structural
+   "Field Reports ⌄" switcher                       └─ "Start new report" ─▶ report (a draft at once)
+                └─▶ /projects  (CX, unchanged)           ├─ Capture     floor plans + pins, this report's photos
+                                                          ├─ Report      editor ▸ print / issued revisions
+                                                          └─ Site Route  route from pins + photo times; Start Tracking (placeholder)
 ```
 
 - Sign-in, the logo and the "Field Reports" heading land on CA. The chevron
   menu switches to CX Field Reports. CX URLs are unchanged.
-- Project tabs are real routes, so the phone's back gesture works:
-  `/field-reports/{p}/capture | reports | route`.
-- Reports open inside the Reports tab by query string:
-  - `?report={id}` opens the editor;
+- The header search (CA pages only) finds projects and reports (by number,
+  author, discipline or project). Offline it searches what is on the device.
+- A project opens on `/field-reports/{p}/reports`. Old `/capture` and `/route`
+  links redirect there.
+- Reports and their steps open on that page by query string:
+  - `?report={id}` opens the Report step (the editor);
+  - `&step=capture` / `&step=route` open the Capture and Site Route steps;
   - `&view=print` opens the printable draft;
   - `&rev={n}` opens an issued revision.
 
   This is what lets a report started offline open with no signal (see
-  `src/lib/ca/routes.ts`).
+  `src/lib/ca/routes.ts`). Steps switch with `history.pushState`, so the
+  phone's back gesture walks them.
 
 ### Features
 
 - **CA projects.** A separate list from CX. New projects are picked from the
-  configured source (mock samples today; VantagePoint or the CA app via
-  config) or entered manually.
+  CA application (parkhill-ccr); when it cannot be reached, from VantagePoint.
+  Projects already created here are listed greyed out ("Already created in
+  Field Reports"). Manual entry is offered only when no source answers.
+  Mock mode offers labelled sample projects.
+- **Reports by discipline.** A project's reports are grouped under
+  Architecture, Civil, MP, Electrical and Structural (all the same report for
+  now). Each group's **Start new report** saves a draft on the device at once,
+  with the discipline and the engineer's name, so leaving by accident loses
+  nothing. Each row shows "Started by …" and when it was last edited.
 - **Photos.** Take photo (phone camera), choose photos (library,
   multi-select), or rapid capture (in-app camera for a walk-through).
   - Photos are downscaled on the device to about 200–400 KB, and captions are
     editable.
-  - Photos belong to the project, so capture can happen before any report
-    exists.
+  - Photos taken in a report's Capture step belong to that report. Photos from
+    before reports had steps belong to none and stay available to every
+    report.
 - **Floor plans and pins.**
-  - Add a drawing by uploading a PDF (choose the page) or an image, or by
-    importing a sheet from the drawing source. PDFs are rendered to a sheet
-    image on the device, so phones never parse PDFs on site.
+  - Upload the project's drawing set as one PDF. It is stored with the
+    project (Blob Storage in Azure), so every device sees it. Every page is
+    listed as a sheet, `<sheet number> - <sheet name>`, read from its title
+    block by AI (`CA_SHEET_NAMING`) and editable by engineers; edits are
+    never overwritten by AI. Engineers add the floor plan they are on.
+  - The project's current drawing set in the CA application (its Document
+    Control module) is offered under "From the CA application". **Import**
+    stores it like an uploaded set, marked with its version ("v3 — 100% CD"),
+    and that version shows as **Added** afterwards. A newer version is offered
+    as a new import.
+  - A sheet is rendered to an image on the device when added, so phones never
+    parse PDFs on site.
   - The drawing viewer supports pinch, pan and zoom.
   - **Drop pin** places a pin with one tap. Each pin has a label, a note, and
     any number of photos, taken directly into it or added later.
@@ -126,8 +149,9 @@ Sign in ─▶ /field-reports  (CA projects)  ──▶  project
     Corrected; description; unlimited photos with per-report captions; reorder);
   - comments and distribution.
 
-  Any deficient item adds the "Notice of Deficient Items". **Create report
-  from selected photos** (Capture tab) makes one item per pin.
+  Any deficient item adds the "Notice of Deficient Items". On the Report step,
+  **Add to report** turns the photos from Capture that are not in the report
+  yet into items, one per pin.
 - **Print / PDF.**
   - A port of the template's structure and CSS (`src/components/ca/report/`).
   - Photos print in rows of two; a row never splits across pages; a single
@@ -168,7 +192,8 @@ Everything captured is saved on the device **first**, in IndexedDB database
 - **Service worker** (`public/sw.js`, scope `/field-reports`, so CX is never
   affected):
   - Keeps CA screens loadable offline.
-  - Opening a project online also caches its three tabs and their scripts.
+  - Opening a project online also caches its reports page (which serves every
+    report and step) and its scripts.
 - **Housekeeping:** synced photos older than 30 days are removed from the
   device. Unsynced photos are never removed.
 
@@ -205,15 +230,22 @@ secrets). The full table is in
 - `CA_DATA_MODE=azure` uses Cosmos and Blob through the app's managed identity.
   It never falls back to mock, and **production requires `CA_DATA_MODE` to be
   set**.
-- `CA_PROJECT_SOURCE` and `CA_DRAWING_SOURCE` choose `mock`, `vantagepoint`
-  (projects only), `ca-app` (stub until connected) or `none`.
+- `CA_PROJECT_SOURCE` (default `ca-app` in azure mode) and
+  `CA_PROJECT_FALLBACK_SOURCE` (default `vantagepoint`) choose where New
+  Project lists projects from. `ca-app` calls parkhill-ccr with an app-only
+  token, which ccr must accept first (see
+  [docs/ca-integration-contracts.md](docs/ca-integration-contracts.md) §5).
+- `CA_DRAWING_SOURCE` (default `ca-app` in azure mode) chooses where Add
+  Drawing offers drawing sets from: `ca-app` is the current set in ccr's
+  Document Control, through the same app-only token. Uploading a set by hand
+  always works.
 
 ### Testing
 
 | Command | Covers |
 | --- | --- |
-| `npm test` | 79 unit tests: config, validation, mock and Cosmos repositories (shared contract tests; Cosmos against an in-memory stand-in), offline sync (outbox, retries, no duplicates, auth pause, edits during upload), site route ordering, report layout, issuing and revisions |
-| `npm run test:e2e` | 44 browser tests at phone (390×844) and desktop (1280×800) |
+| `npm test` | 158 unit tests: config, validation, mock and Cosmos repositories (shared contract tests; Cosmos against an in-memory stand-in), offline sync (outbox, retries, no duplicates, auth pause, edits during upload), site route ordering, report layout, issuing and revisions |
+| `npm run test:e2e` | 60 browser tests at phone (390×844) and desktop (1280×800) |
 
 The browser tests cover:
 
@@ -225,6 +257,9 @@ The browser tests cover:
 - drawings (import, PDF page choice);
 - pins, including offline pins;
 - Site Route;
+- reports grouped by discipline, drafts with their author, report steps;
+- New Project fallback and greyed-out existing projects;
+- nav search (and its absence on CX);
 - the full report flow: from photos, through editing on the template and the print layout
   rules, to Rev 0 and Rev 1;
 - the printed PDF's footer;
@@ -283,17 +318,17 @@ Details and the exact contracts are in
       and `caReports` (all partitioned on `/projectNumber`), plus the Blob
       container `ca-files`. Confirm the app identity's roles cover them.
 - [ ] Add a Blob **CORS** rule allowing `GET` from the app origin. It is needed
-      for offline caching of drawing sheets.
+      for offline caching of drawing sheets and for reading drawing-set PDFs
+      (allow the `Range` header and expose `Accept-Ranges`, `Content-Range`
+      and `Content-Length` so pdf.js can fetch only the pages it needs).
 - [ ] Run `CA_DATA_MODE=azure` against a **non-production** account and
       verify the flows in the contracts doc. The Cosmos and Blob
       implementations have not run against real services yet.
 - [ ] Set `CA_DATA_MODE=azure` and the source settings in App Service.
-- [ ] Settle the [open questions](docs/ca-integration-contracts.md#7-open-questions)
-      with the CA application owner: API and auth, project identity, where
-      drawing sets live, and **how "latest approved" is determined** (not
-      assumed anywhere).
-- [ ] Implement `caAppProjectSource` and `caAppDrawingSource` in
-      `src/repositories/ca/sources.ts`.
+- [ ] Set `CA_APP_API_BASE_URL` and `CA_APP_API_SCOPE` in App Service, once
+      parkhill-ccr is deployed with service-caller auth and its
+      `document-control` container (see the contracts doc §5).
+- [ ] Settle the remaining [open questions](docs/ca-integration-contracts.md#7-open-questions).
 - [ ] Decide retention for issued revisions and photos, whether reports are
       written back to the CA app, and whether server-side PDF is needed.
 

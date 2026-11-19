@@ -19,6 +19,7 @@ export type DrawingMeta = Pick<
   | "height"
   | "source"
   | "externalRef"
+  | "drawingSetId"
 >;
 
 export type OfferedDrawing = CaSourceDrawing & { imported: boolean };

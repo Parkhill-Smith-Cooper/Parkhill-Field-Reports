@@ -24,7 +24,8 @@ describe("landing and section routing", () => {
   });
 
   it("builds CA project URLs", () => {
-    expect(caProjectPath("45371.25.01")).toBe("/field-reports/45371.25.01/capture");
+    // A project opens on its reports, grouped by discipline.
+    expect(caProjectPath("45371.25.01")).toBe("/field-reports/45371.25.01/reports");
     expect(caProjectPath("A B", "reports")).toBe("/field-reports/A%20B/reports");
   });
 });
