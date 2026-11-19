@@ -209,6 +209,46 @@ describe.each(repos)("drawing sync: %s", (_name, makeRepo) => {
     expect(await repo.drawingSets.list(PROJECT)).toEqual([]);
   });
 
+  it("a run that read /latest before a newer run finished does not leave stale flags", async () => {
+    const { repo, deps, state } = await setup();
+    // The newer run (another server instance) has already made v2 current.
+    state.current = offer(2);
+    await reconcile(deps, PROJECT);
+    // The older run read v1 before v2 was published, and writes after it.
+    const answers = [offer(1)];
+    const stale: DrawingSyncDeps = {
+      ...deps,
+      source: {
+        ...deps.source!,
+        async listLatest() {
+          return [answers.shift() ?? state.current!];
+        },
+      },
+    };
+    expect(await reconcile(stale, PROJECT)).toMatchObject({ status: "current", setId: syncedSetId("proj-uuid-v2") });
+    const sets = await repo.drawingSets.list(PROJECT);
+    expect(Object.fromEntries(sets.map((s) => [s.externalRef, s.isCurrent]))).toEqual({
+      "proj-uuid-v1": false,
+      "proj-uuid-v2": true,
+    });
+  });
+
+  it("gives up (to retry later) when the source keeps changing during the run", async () => {
+    const { deps } = await setup();
+    let version = 0;
+    const churning: DrawingSyncDeps = {
+      ...deps,
+      source: {
+        ...deps.source!,
+        async listLatest() {
+          version += 1;
+          return [offer(version)];
+        },
+      },
+    };
+    await expect(reconcile(churning, PROJECT)).rejects.toThrow(/kept changing/);
+  });
+
   it("ignores projects not set up here, and does nothing without a source", async () => {
     const { deps } = await setup();
     expect(await reconcile(deps, "OTHER-1")).toEqual({ status: "no-project" });
@@ -223,41 +263,42 @@ describe("scheduleReconcile", () => {
     const repo = createMockCaRepository({ dataDir: null });
     await repo.projects.create({ projectNumber: PROJECT, name: "School", source: "ca-app" }, "eng");
     const { source, state } = fakeSource();
-    const listLatest = vi.spyOn(source, "listLatest");
-    return { d: { repo, files: createMockFileStore({ dataDir: null }), source }, state, listLatest };
+    // One `projects.get` per reconcile run (each run also re-reads `/latest` to confirm).
+    const runs = vi.spyOn(repo.projects, "get");
+    return { d: { repo, files: createMockFileStore({ dataDir: null }), source }, state, runs };
   }
 
   it("runs once per interval unless forced, and one run per project at a time", async () => {
-    const { d, listLatest } = await deps();
+    const { d, runs } = await deps();
     const t0 = 1_000_000;
     const [a, b] = [scheduleReconcile(() => d, PROJECT, { nowMs: t0 }), scheduleReconcile(() => d, PROJECT, { nowMs: t0 })];
     expect(a).toBe(b);
     await a;
     expect(await scheduleReconcile(() => d, PROJECT, { nowMs: t0 + 1000 })).toBeNull();
-    expect(listLatest).toHaveBeenCalledTimes(1);
+    expect(runs).toHaveBeenCalledTimes(1);
     await scheduleReconcile(() => d, PROJECT, { nowMs: t0 + 1000, force: true });
-    expect(listLatest).toHaveBeenCalledTimes(2);
+    expect(runs).toHaveBeenCalledTimes(2);
     await scheduleReconcile(() => d, PROJECT, { nowMs: t0 + 1000 + RECONCILE_INTERVAL_MS });
-    expect(listLatest).toHaveBeenCalledTimes(3);
+    expect(runs).toHaveBeenCalledTimes(3);
   });
 
   it("a push during a run triggers one more run, so the newest version is not missed", async () => {
-    const { d, state, listLatest } = await deps();
+    const { d, state, runs } = await deps();
     const first = scheduleReconcile(() => d, PROJECT, { nowMs: 1 });
     state.current = offer(2);
     scheduleReconcile(() => d, PROJECT, { nowMs: 2, force: true });
     expect(await first).toMatchObject({ setId: syncedSetId("proj-uuid-v2") });
-    expect(listLatest).toHaveBeenCalledTimes(2);
+    expect(runs).toHaveBeenCalledTimes(2);
   });
 
   it("never throws: a failure is logged, and the next request tries again", async () => {
-    const { d, state, listLatest } = await deps();
+    const { d, state, runs } = await deps();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     state.fail = new Error("ccr down");
     expect(await scheduleReconcile(() => d, PROJECT, { nowMs: 1 })).toBeNull();
     state.fail = undefined;
     expect(await scheduleReconcile(() => d, PROJECT, { nowMs: 2 })).toMatchObject({ status: "current" });
-    expect(listLatest).toHaveBeenCalledTimes(2);
+    expect(runs).toHaveBeenCalledTimes(2);
   });
 });
 

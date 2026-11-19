@@ -89,9 +89,33 @@ export function useCaDrawingSets(projectNumber: string) {
     setSets(list);
   }, []);
 
+  /**
+   * A change the server accepted (indexing, naming, an edit, an upload):
+   * shown, and kept on the device too, so the sheets are there offline
+   * without waiting for the next listing.
+   */
+  const storeAccepted = useCallback(
+    (list: CaDrawingSetWithUrl[]) => {
+      store(list);
+      void mirrorDrawingSets(projectNumber, list).catch(() => undefined);
+    },
+    [projectNumber, store],
+  );
+
   const replaceSet = useCallback(
-    (next: CaDrawingSetWithUrl) => store(latest.current.map((s) => (s.id === next.id ? next : s))),
-    [store],
+    (next: CaDrawingSetWithUrl) => storeAccepted(latest.current.map((s) => (s.id === next.id ? next : s))),
+    [storeAccepted],
+  );
+
+  /** Forgets indexing failures, so those sets are tried again. */
+  const clearIndexingFailures = useCallback(
+    () =>
+      setIndexing((prev) =>
+        Object.values(prev).some((status) => "failed" in status)
+          ? Object.fromEntries(Object.entries(prev).filter(([, status]) => !("failed" in status)))
+          : prev,
+      ),
+    [],
   );
 
   const refresh = useCallback(
@@ -250,7 +274,7 @@ export function useCaDrawingSets(projectNumber: string) {
       );
       // This device already has the PDF open: no need to download it back.
       docs.current.set(set.id, Promise.resolve(doc));
-      store([...latest.current.filter((s) => s.id !== set.id), set]);
+      storeAccepted([...latest.current.filter((s) => s.id !== set.id), set]);
       void nameSheets(set, lines);
       return set;
     } catch (error) {
@@ -318,8 +342,15 @@ export function useCaDrawingSets(projectNumber: string) {
     }
   }, [sets, indexing, indexSet]);
 
+  // Back online: sets that failed to index (no connection, say) are tried again.
+  useEffect(() => {
+    window.addEventListener("online", clearIndexingFailures);
+    return () => window.removeEventListener("online", clearIndexingFailures);
+  }, [clearIndexingFailures]);
+
   /** "Check for updates": asks the server to look at the CA application now. */
   async function checkForUpdates() {
+    clearIndexingFailures();
     await checkDrawingSetUpdates(projectNumber);
     setSyncing(true);
     await refresh();
@@ -335,7 +366,7 @@ export function useCaDrawingSets(projectNumber: string) {
     const doc = docs.current.get(setId);
     docs.current.delete(setId);
     void doc?.then((d) => d.close(), () => undefined);
-    store(latest.current.filter((s) => s.id !== setId));
+    storeAccepted(latest.current.filter((s) => s.id !== setId));
     setNaming((prev) => {
       const copy = { ...prev };
       delete copy[setId];

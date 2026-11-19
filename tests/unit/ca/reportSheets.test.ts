@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CaDrawingView } from "@/hooks/ca/useCaDrawings";
 import { buildReportLocations } from "@/lib/ca/reportLocations";
-import { defaultSheet, reportSheetChoices } from "@/lib/ca/reportSheets";
+import { defaultSheet, needsOfflineCopy, reportSheetChoices } from "@/lib/ca/reportSheets";
 import { syncedSheetDrawingId } from "@/lib/ca/syncedSets";
 import { validateReportContent } from "@/lib/ca/validation";
 import type { CaDrawingSet } from "@/types/ca";
@@ -102,6 +102,27 @@ describe("reportSheetChoices", () => {
     expect(reportSheetChoices([], { setId: "dcset_x" }, [set("dcset_x", 3, { indexed: false, sheets: [], pageCount: 0 })])).toEqual([]);
     const all = [view("a", { drawingSetId: v1.id }), view("b")];
     expect(reportSheetChoices(all, undefined, [v1, v2]).map((d) => d.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("needsOfflineCopy", () => {
+  it("an older report on a new device: its set's sheets on the server but not cached here still count", () => {
+    const onServer = view(syncedSheetDrawingId(v1.id, 2), { drawingSetId: v1.id, page: 2, isCurrent: false, offlineReady: false });
+    const choices = reportSheetChoices([onServer], { setId: v1.id }, [v1, v2]);
+    expect(choices.filter(needsOfflineCopy).map((c) => [c.id, c.unrendered ?? false])).toEqual([
+      [syncedSheetDrawingId(v1.id, 1), true],
+      [onServer.id, false],
+      [syncedSheetDrawingId(v1.id, 3), true],
+    ]);
+  });
+
+  it("cached sheets are done, and superseded drawings of a report with no set are left out", () => {
+    const choices = reportSheetChoices(
+      [view("cached"), view("old", { isCurrent: false, offlineReady: false })],
+      undefined,
+      [],
+    );
+    expect(choices.some(needsOfflineCopy)).toBe(false);
   });
 });
 

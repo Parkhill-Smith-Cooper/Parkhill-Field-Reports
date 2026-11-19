@@ -252,8 +252,13 @@ that copy ([`src/lib/ca/drawingSync.ts`](../src/lib/ca/drawingSync.ts)).
    their sheets (drawings) likewise. **Nothing is deleted**: reports made
    with an older version keep it. A version deleted in ccr (a mistaken
    upload) simply stops being current, and the previous one is current again.
+4. Ask `/latest` again. If the answer changed while step 3 was writing, apply
+   the new answer (at most 3 passes, then fail and retry on the next request).
+   Runs on different server instances can overlap, and this keeps a run that
+   read `/latest` earlier from leaving stale flags behind: whoever writes a
+   flag last has just confirmed it with ccr. The specification sync does the same.
 
-It runs (one run per project at a time, on `globalThis`):
+It runs (one run per project at a time per server instance, on `globalThis`):
 
 | When | How |
 | --- | --- |

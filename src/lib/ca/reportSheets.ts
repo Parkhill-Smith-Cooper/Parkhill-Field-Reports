@@ -77,6 +77,15 @@ export function reportSheetChoices(
 }
 
 /**
+ * The sheet still has to be put on this device for an offline visit: never
+ * rendered, or rendered but its image not cached here. Superseded drawings a
+ * report without a set lists are left out, as the device never caches those.
+ */
+export function needsOfflineCopy(choice: CaSheetChoice): boolean {
+  return Boolean(choice.unrendered) || (!choice.offlineReady && choice.isCurrent);
+}
+
+/**
  * The sheet shown first: one already on the device, else the first that
  * looks like a floor plan, else the first sheet.
  */

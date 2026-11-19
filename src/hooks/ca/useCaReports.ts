@@ -248,6 +248,8 @@ export function useCaReport(projectNumber: string, reportId: string) {
     revisions: server?.revisions ?? [],
     syncState: local?.syncState ?? (server ? "synced" : "pending"),
     serverReachable: serverState !== "offline",
+    /** "ok": `report` is the server's; "missing": never reached the server; else not known yet. */
+    serverState,
     save,
     refresh: readServer,
   };

@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, Box, Button, HStack, Input, Spinner, Stack, Text } from "@chakra-ui/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LuChevronDown, LuChevronRight, LuDownload, LuFileText, LuRefreshCw } from "react-icons/lu";
 
 import { notifyError } from "@/components/ui/toaster";
@@ -76,7 +76,8 @@ export function CaSpecList() {
     };
   }, [read, apply]);
 
-  // While the server is still copying (a first sync of a whole project manual), ask again.
+  // While the server is still copying (a first sync of a whole project manual),
+  // ask again. Each answer is a new `sections` array, which re-arms this.
   useEffect(() => {
     if (!syncing) return;
     let active = true;
@@ -85,7 +86,18 @@ export function CaSpecList() {
       active = false;
       clearTimeout(timer);
     };
-  }, [syncing, read, apply]);
+  }, [syncing, sections, read, apply]);
+
+  // One object URL per section revision, reused on every open and released
+  // when the page goes (a PDF tab already showing it keeps its copy).
+  const objectUrls = useRef(new Map<string, string>());
+  useEffect(() => {
+    const urls = objectUrls.current;
+    return () => {
+      for (const url of urls.values()) URL.revokeObjectURL(url);
+      urls.clear();
+    };
+  }, []);
 
   const groups = useMemo(
     () => groupByDivision(sections.filter((s) => specSectionMatches(s, search))),
@@ -106,14 +118,18 @@ export function CaSpecList() {
     const tab = window.open("", "_blank");
     setOpening(section.id);
     try {
-      let blob = await cachedSpecFile(section.id);
-      if (!blob) {
-        const { url } = await fetchSpecSection(projectNumber, section.id);
-        blob = await apiGetBlob(url);
-        await storeSpecFile(section, blob);
-        setOnDevice((prev) => new Set(prev).add(section.id));
+      let objectUrl = objectUrls.current.get(section.id);
+      if (!objectUrl) {
+        let blob = await cachedSpecFile(section.id);
+        if (!blob) {
+          const { url } = await fetchSpecSection(projectNumber, section.id);
+          blob = await apiGetBlob(url);
+          await storeSpecFile(section, blob);
+          setOnDevice((prev) => new Set(prev).add(section.id));
+        }
+        objectUrl = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: "application/pdf" }));
+        objectUrls.current.set(section.id, objectUrl);
       }
-      const objectUrl = URL.createObjectURL(blob.type ? blob : new Blob([blob], { type: "application/pdf" }));
       if (tab) {
         tab.location.href = objectUrl;
       } else {

@@ -108,6 +108,25 @@ describe.each(repos)("specification sync: %s", (_name, makeRepo) => {
     expect(state.fetches).toHaveLength(3);
   });
 
+  it("a run that listed the source before a newer run finished does not leave stale flags", async () => {
+    const { repo, deps, state } = await setup();
+    const before = state.current;
+    state.current = [offer("033000", 2), offer("051200", 1), offer("092900", 1)];
+    await reconcileSpecs(deps, PROJECT); // the newer run, on another instance
+    const answers = [before];
+    const stale: SpecSyncDeps = {
+      ...deps,
+      source: {
+        ...deps.source!,
+        async listCurrent() {
+          return answers.shift() ?? state.current;
+        },
+      },
+    };
+    await reconcileSpecs(stale, PROJECT);
+    expect(await currentKeys(repo)).toEqual(["033000:r2", "051200:r1", "092900:r1"]);
+  });
+
   it("a new revision supersedes only its own section, and the old one is kept", async () => {
     const { repo, deps, state } = await setup();
     await reconcileSpecs(deps, PROJECT);

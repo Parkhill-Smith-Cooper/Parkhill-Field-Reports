@@ -306,7 +306,7 @@ function SetLine({ sheets }: { sheets: ReturnType<typeof useReportSheets> }) {
         Drawing set: {set.revisionLabel ?? set.title ?? set.fileName}
         {set.isCurrent === false ? " (a newer set is in the CA application)" : ""}
       </Text>
-      {sheets.online && sheets.choices.some((c) => c.unrendered) && (
+      {sheets.online && sheets.needsOffline && (
         <Button
           size="sm"
           variant="ghost"

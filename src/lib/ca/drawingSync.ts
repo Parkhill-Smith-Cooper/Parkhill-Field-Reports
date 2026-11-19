@@ -122,17 +122,54 @@ export async function ingestSet(
   return { set, ingested: true };
 }
 
+/** Passes `reconcile` makes while the source keeps changing under it. */
+export const MAX_RECONCILE_PASSES = 3;
+
+/** True when two answers from `/latest` name the same set, label and title. */
+function sameOffer(a: CaSourceDrawing | null, b: CaSourceDrawing | null): boolean {
+  if (!a || !b) return a === b;
+  return a.externalRef === b.externalRef && a.revisionLabel === b.revisionLabel && a.title === b.title;
+}
+
 /**
  * Makes the project's synced sets match what the source says now. See the
- * module comment. Throws when the source cannot be reached (nothing changes).
+ * module comment. Throws when the source cannot be reached.
+ *
+ * The scheduler runs one reconcile per project at a time, but only within one
+ * server instance. Two instances (or a push and a page load landing on
+ * different workers) can overlap, and a run that read `/latest` earlier could
+ * finish after a newer one and write stale current flags. So every pass ends
+ * by asking the source again: if the answer changed while it was writing, it
+ * applies the new answer. The last writer of any record has therefore just
+ * confirmed what it wrote, and the flags converge on what ccr says.
  */
 export async function reconcile(deps: DrawingSyncDeps, projectNumber: string): Promise<ReconcileResult> {
   const { repo, source } = deps;
   if (!source) return { status: "no-source" };
   if (!(await repo.projects.get(projectNumber))) return { status: "no-project" };
-  const now = (deps.now ?? (() => new Date()))().toISOString();
 
-  const offer = currentOffer(await source.listLatest(projectNumber));
+  let offer = currentOffer(await source.listLatest(projectNumber));
+  for (let pass = 1; ; pass++) {
+    const result = await applyOffer(deps, source, projectNumber, offer);
+    const confirmed = currentOffer(await source.listLatest(projectNumber));
+    if (sameOffer(confirmed, offer)) return result;
+    if (pass >= MAX_RECONCILE_PASSES) {
+      // Thrown, so the scheduler lets the next request try again at once.
+      throw new Error(`The CA application's current drawing set for ${projectNumber} kept changing during sync.`);
+    }
+    offer = confirmed;
+  }
+}
+
+/** One pass of `reconcile`: ingest the offered set and set every current flag to match it. */
+async function applyOffer(
+  deps: DrawingSyncDeps,
+  source: CaDrawingSource,
+  projectNumber: string,
+  offer: CaSourceDrawing | null,
+): Promise<ReconcileResult> {
+  const { repo } = deps;
+  const now = (deps.now ?? (() => new Date()))().toISOString();
   let current: CaDrawingSet | null = null;
   let ingested = false;
   if (offer) {
