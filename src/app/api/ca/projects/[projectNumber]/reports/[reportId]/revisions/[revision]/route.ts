@@ -5,7 +5,7 @@ import { getCaFileStore, getCaRepository } from "@/repositories/ca";
 
 /**
  * One issued revision, exactly as issued, with short-lived read URLs for the
- * photo files it froze. Read-only: no route changes a revision.
+ * photo and floor-plan files it froze. Read-only: no route changes a revision.
  */
 
 type Params = { params: Promise<{ projectNumber: string; reportId: string; revision: string }> };
@@ -31,6 +31,12 @@ export async function GET(_request: Request, { params }: Params) {
         Object.entries(revision.photoPaths).map(async ([id, path]) => [id, await files.readUrl(path)] as const),
       ),
     );
-    return Response.json({ revision, photoUrls });
+    const drawings = new Map(
+      (revision.locations ?? []).flatMap((l) => (l.drawing ? [[l.drawing.id, l.drawing.filePath] as const] : [])),
+    );
+    const drawingUrls = Object.fromEntries(
+      await Promise.all([...drawings].map(async ([id, path]) => [id, await files.readUrl(path)] as const)),
+    );
+    return Response.json({ revision, photoUrls, drawingUrls });
   });
 }

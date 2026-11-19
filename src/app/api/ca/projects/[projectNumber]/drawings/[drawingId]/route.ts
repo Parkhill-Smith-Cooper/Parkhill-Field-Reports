@@ -40,6 +40,7 @@ type Meta = Pick<
   | "height"
   | "source"
   | "externalRef"
+  | "drawingSetId"
 >;
 
 export async function PUT(request: Request, { params }: Params) {
@@ -77,6 +78,11 @@ export async function PUT(request: Request, { params }: Params) {
       return apiError("That drawing source is not configured.", 400);
     }
 
+    // A sheet from an uploaded set must come from a set of this project.
+    if (m.drawingSetId && !(await repo.drawingSets.get(p.projectNumber, m.drawingSetId))) {
+      return apiError("That drawing set was not found.", 400);
+    }
+
     const file = form.get("file");
     if (!(file instanceof File)) return apiError("Include the drawing image.", 400);
     const extension = CA_DRAWING_IMAGE_TYPES[file.type as keyof typeof CA_DRAWING_IMAGE_TYPES];
@@ -104,6 +110,7 @@ export async function PUT(request: Request, { params }: Params) {
       height: m.height,
       source: m.source,
       ...(m.externalRef ? { externalRef: m.externalRef } : {}),
+      ...(m.drawingSetId ? { drawingSetId: m.drawingSetId } : {}),
       isCurrent: true,
       uploadedAt: new Date().toISOString(),
       uploadedBy: await currentUser(),

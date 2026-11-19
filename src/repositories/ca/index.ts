@@ -89,6 +89,18 @@ export function getCaProjectSource(): CaProjectSource | null {
   }
 }
 
+/** Used when the project source fails; `null` when there is no fallback. */
+export function getCaProjectFallbackSource(): CaProjectSource | null {
+  switch (caConfig.projectFallbackSource) {
+    case "vantagepoint":
+      return vantagePointProjectSource;
+    case "mock":
+      return mockProjectSource;
+    case "none":
+      return null;
+  }
+}
+
 /** `null` when no upstream drawing source is configured (upload only). */
 export function getCaDrawingSource(): CaDrawingSource | null {
   switch (caConfig.drawingSource) {
@@ -106,6 +118,7 @@ export function caRuntimeInfo() {
   return {
     dataMode: caConfig.dataMode,
     projectSource: caConfig.projectSource,
+    projectFallbackSource: caConfig.projectFallbackSource,
     drawingSource: caConfig.drawingSource,
   };
 }

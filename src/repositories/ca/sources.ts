@@ -2,21 +2,25 @@ import "server-only";
 
 import {
   CaNotConfiguredError,
+  isCaError,
   type CaDrawingSource,
   type CaProjectSource,
   type CaSourceDrawing,
 } from "@/lib/ca/contracts";
+import { azureCredential } from "@/lib/azure/credential";
+import { ccrPaths, mapCcrDrawings } from "@/lib/ca/ccrDrawings";
+import { archProjectNumberFromWbs, mapCcrProjects } from "@/lib/ca/ccrProjects";
+import { caConfig } from "@/lib/ca/config";
 import { listVantagePointProjects } from "@/repositories/vantagepointRepository";
 import type { CaSourceProject } from "@/types/ca";
 
 /**
  * Upstream sources for CA projects and drawing sets.
  *
- * Only the mock and VantagePoint sources work today. The CA application
- * (parkhill-ccr) sources are deliberate stubs: how that system exposes
- * projects and decides which drawing set is the latest *approved* one has not
- * been confirmed, so nothing here guesses. See
- * docs/ca-integration-contracts.md for the questions to settle first.
+ * Both come from the CA application (the parkhill-ccr backend): projects from
+ * its project list, with VantagePoint as the fallback when it cannot be
+ * reached; drawing sets from its Document Control module. See
+ * docs/ca-integration-contracts.md.
  */
 
 // ---------------------------------------------------------------------------
@@ -55,26 +59,87 @@ export const mockProjectSource: CaProjectSource = {
   },
 };
 
-/** Reuses the CX app's existing, read-only VantagePoint (Fabric) lookup. */
+/**
+ * Reuses the CX app's existing, read-only VantagePoint (Fabric) lookup. Numbers
+ * are converted the way the CA application converts them, so a project picked
+ * here matches the same project picked from the CA app.
+ */
 export const vantagePointProjectSource: CaProjectSource = {
   kind: "vantagepoint",
   async list() {
     const projects = await listVantagePointProjects();
     return projects.map((p) => ({
-      projectNumber: p.projectNumber,
+      projectNumber: archProjectNumberFromWbs(p.projectNumber),
       name: p.name,
       source: "vantagepoint" as const,
+      externalRef: p.projectNumber,
     }));
   },
 };
 
-/** TODO(Marcelo): implement against the CA application's project API. */
+/** How long the CA application has to start answering (headers, not the whole body). */
+const CA_APP_TIMEOUT_MS = 15_000;
+const UNAVAILABLE = "The CA application could not be reached.";
+
+/**
+ * `GET {CA_APP_API_BASE_URL}{path}` with an app-only Entra token for
+ * `CA_APP_API_SCOPE`. The ccr backend accepts such a token only because it
+ * grants this app the `FieldReports.Read` app role, and only on its service
+ * read routes.
+ *
+ * Throws `CaNotConfiguredError` when the connection is not configured;
+ * otherwise returns the response, whatever its status. The timeout covers the
+ * wait for the response, not reading its body, so a large drawing set can
+ * stream for as long as it takes.
+ */
+async function ccrGet(path: string, accept: string): Promise<Response> {
+  let url: string;
+  let scope: string;
+  try {
+    url = `${caConfig.caAppApiBaseUrl}${path}`;
+    scope = caConfig.caAppApiScope;
+  } catch {
+    throw new CaNotConfiguredError("The CA application is not configured (CA_APP_API_BASE_URL, CA_APP_API_SCOPE).");
+  }
+  const token = await azureCredential().getToken(scope);
+  if (!token) throw new Error("No token for the CA application scope.");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error("The CA application did not answer in time.")), CA_APP_TIMEOUT_MS);
+  try {
+    return await fetch(url, {
+      headers: { Authorization: `Bearer ${token.token}`, Accept: accept },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Logs the detail on the server; the user sees `message` only. */
+function unavailable(what: string, error: unknown, message = UNAVAILABLE): never {
+  if (isCaError(error, "CaNotConfiguredError")) throw error;
+  console.error(`[CA] CA application ${what} failed:`, error instanceof Error ? error.message : error);
+  throw new CaNotConfiguredError(message);
+}
+
+/**
+ * Projects from the CA application: `GET /api/projects`.
+ *
+ * Every failure (not configured, no token, 401/403, timeout, 5xx, bad body) is
+ * a `CaNotConfiguredError`, which makes New Project fall back to VantagePoint.
+ * Details are logged on the server, never shown to the user.
+ */
 export const caAppProjectSource: CaProjectSource = {
   kind: "ca-app",
   async list() {
-    throw new CaNotConfiguredError(
-      "The CA application project feed is not connected yet. Enter the project manually for now.",
-    );
+    try {
+      const response = await ccrGet(ccrPaths.projects(), "application/json");
+      if (!response.ok) throw new Error(`CA application responded ${response.status}.`);
+      return mapCcrProjects(await response.json());
+    } catch (error) {
+      unavailable("project list", error);
+    }
   },
 };
 
@@ -119,18 +184,42 @@ export const mockDrawingSource: CaDrawingSource = {
   },
 };
 
-/** TODO(Marcelo): implement against the CA application's drawing API. */
+/**
+ * The project's current drawing set from the CA application's Document
+ * Control module (two service routes, see `ccrPaths`):
+ *
+ * - `listLatest`: `[]` or the current set. ccr says which set is current;
+ *   nothing here infers it. A project the CA application does not have (404)
+ *   simply has no drawings to offer.
+ * - `fetchFile`: the set's PDF, streamed through without being buffered.
+ *
+ * Other failures are logged and become `CaNotConfiguredError` (503 with a
+ * plain message); uploading a drawing set by hand still works.
+ */
 export const caAppDrawingSource: CaDrawingSource = {
   kind: "ca-app",
-  async listLatest() {
-    throw new CaNotConfiguredError(
-      "The CA application drawing feed is not connected yet. Upload the drawing manually for now.",
-    );
+  async listLatest(projectNumber) {
+    try {
+      const response = await ccrGet(ccrPaths.latestDrawings(projectNumber), "application/json");
+      if (response.status === 404) return [];
+      if (!response.ok) throw new Error(`CA application responded ${response.status}.`);
+      return mapCcrDrawings(await response.json());
+    } catch (error) {
+      unavailable("drawing list", error, "The CA application's drawings could not be loaded. You can still upload the drawing set.");
+    }
   },
-  async fetchFile() {
-    throw new CaNotConfiguredError(
-      "The CA application drawing feed is not connected yet.",
-    );
+  async fetchFile(projectNumber, externalRef) {
+    try {
+      const response = await ccrGet(ccrPaths.drawingFile(projectNumber, externalRef), "application/pdf");
+      if (!response.ok || !response.body) throw new Error(`CA application responded ${response.status}.`);
+      return {
+        bytes: response.body,
+        contentType: "application/pdf",
+        fileName: `${externalRef}.pdf`,
+      };
+    } catch (error) {
+      unavailable("drawing file", error, "The drawing set could not be downloaded from the CA application.");
+    }
   },
 };
 

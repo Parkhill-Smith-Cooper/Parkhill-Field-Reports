@@ -140,10 +140,11 @@ export default function CaProjectsPage() {
               Offline — showing projects saved on this device.
             </Text>
           )}
-          {projects.length > 6 && (
+          {projects.length > 0 && (
             <InputGroup startElement={<LuSearch />} maxW={{ md: "sm" }}>
               <Input
                 size="lg"
+                aria-label="Filter projects"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search by number, name or client"

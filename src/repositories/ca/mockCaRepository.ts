@@ -9,8 +9,10 @@ import {
 } from "@/lib/ca/contracts";
 import { formatReportNumber } from "@/lib/ca/reportContent";
 import { applyIssueMark, RevisionAlreadyExistsError } from "@/lib/ca/revisions";
+import { byRecentActivity, reportMatches } from "@/lib/ca/search";
 import type {
   CaDrawing,
+  CaDrawingSet,
   CaPhoto,
   CaPin,
   CaProject,
@@ -36,6 +38,7 @@ type Db = {
   photos: Record<string, Record<string, CaPhoto>>;
   pins: Record<string, Record<string, CaPin>>;
   drawings: Record<string, Record<string, CaDrawing>>;
+  drawingSets: Record<string, Record<string, CaDrawingSet>>;
   reports: Record<string, Record<string, CaReport>>;
   revisions: Record<string, Record<string, CaReportRevision>>;
 };
@@ -46,6 +49,7 @@ function emptyDb(): Db {
     photos: {},
     pins: {},
     drawings: {},
+    drawingSets: {},
     reports: {},
     revisions: {},
   };
@@ -141,6 +145,7 @@ export function createMockCaRepository(options: {
         delete db.photos[projectNumber];
         delete db.pins[projectNumber];
         delete db.drawings[projectNumber];
+        delete db.drawingSets[projectNumber];
         delete db.reports[projectNumber];
         delete db.revisions[projectNumber];
         persist();
@@ -217,10 +222,53 @@ export function createMockCaRepository(options: {
       },
     },
 
+    drawingSets: {
+      async list(projectNumber) {
+        return Object.values(db.drawingSets[projectNumber] ?? {})
+          .sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt))
+          .map(clone);
+      },
+      async get(projectNumber, setId) {
+        const set = db.drawingSets[projectNumber]?.[setId];
+        return set ? clone(set) : null;
+      },
+      async create(set) {
+        const table = bucket(db.drawingSets, set.projectNumber);
+        if (table[set.id]) return clone(table[set.id]);
+        table[set.id] = clone(set);
+        persist();
+        return clone(set);
+      },
+      async updateSheets(projectNumber, setId, change) {
+        const existing = db.drawingSets[projectNumber]?.[setId];
+        if (!existing) return null;
+        existing.sheets = clone(change(clone(existing.sheets)));
+        persist();
+        return clone(existing);
+      },
+      async remove(projectNumber, setId, removedBy) {
+        const existing = db.drawingSets[projectNumber]?.[setId];
+        if (!existing) return null;
+        if (!existing.removed) {
+          Object.assign(existing, { removed: true, removedAt: now(), removedBy });
+          persist();
+        }
+        return clone(existing);
+      },
+    },
+
     reports: {
       async list(projectNumber) {
         return Object.values(db.reports[projectNumber] ?? {})
           .sort((a, b) => b.reportNumber.localeCompare(a.reportNumber))
+          .map(clone);
+      },
+      async search(query, limit) {
+        return Object.values(db.reports)
+          .flatMap((table) => Object.values(table))
+          .filter((r) => reportMatches(r, query))
+          .sort(byRecentActivity)
+          .slice(0, limit)
           .map(clone);
       },
       async get(projectNumber, reportId) {

@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { cookies } from "next/headers";
 
+import { CaNavSearch } from "@/components/ca/CaNavSearch";
 import { FieldReportsMenu } from "@/components/FieldReportsMenu";
 import { UserMenu } from "@/components/UserMenu";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth/session";
@@ -64,6 +65,9 @@ export async function AppHeader() {
               Reports ⌄" switcher between CA and CX (CA_plan.pdf p.1). */}
           <FieldReportsMenu />
         </HStack>
+
+        {/* CA only: renders nothing on CX pages. */}
+        {session && <CaNavSearch />}
 
         {session && (
           <UserMenu name={session.name} email={session.email} />

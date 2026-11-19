@@ -1,12 +1,11 @@
 "use client";
 
 import { Badge, Box, Button, HStack, Spinner, Stack, Text } from "@chakra-ui/react";
-import { CaStateLink } from "@/components/ca/CaStateLink";
 import { useState } from "react";
-import { LuChevronRight, LuClock, LuFileText, LuPlus } from "react-icons/lu";
+import { LuChevronRight, LuClock, LuPlus, LuUser } from "react-icons/lu";
 
 import { CaReportStateBadge } from "@/components/ca/CaReportStateBadge";
-import { EmptyState } from "@/components/EmptyState";
+import { CaStateLink } from "@/components/ca/CaStateLink";
 import { notifyError } from "@/components/ui/toaster";
 import { useCaProject } from "@/context/CaProjectContext";
 import { useCaUser } from "@/context/CaUserContext";
@@ -15,41 +14,45 @@ import { emptyReportContent } from "@/lib/ca/reportContent";
 import { formatLongDate } from "@/lib/ca/reportLayout";
 import { caNavigate, caReportPath } from "@/lib/ca/routes";
 import { hasDeficientItems } from "@/lib/ca/status";
+import { CA_DISCIPLINES, CA_DISCIPLINE_LABELS, type CaDiscipline } from "@/types/ca";
+
+const edited = (iso: string) =>
+  new Date(iso).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 /**
- * Reports tab: the project's Field Observation Reports, newest first, with
- * their state (Draft, Issued Rev N, or being revised). A new report can be
- * started offline; it gets its number when it first syncs.
+ * The project's Field Observation Reports, grouped by Parkhill discipline.
+ * Each discipline can start a new report: the draft is saved on this device
+ * at once (so leaving by accident loses nothing) with the discipline and the
+ * engineer's name, then opens on its Capture step. It gets its report number
+ * when it first syncs.
+ *
+ * Reports started before disciplines existed are listed under "Unassigned".
  */
 export function CaReportList() {
   const { projectNumber, project } = useCaProject();
   const { name } = useCaUser();
   const { reports, loaded, serverReachable } = useCaReports(projectNumber);
-  const [starting, setStarting] = useState(false);
+  const [starting, setStarting] = useState<CaDiscipline | null>(null);
 
-  async function newReport() {
-    setStarting(true);
+  async function newReport(discipline: CaDiscipline) {
+    setStarting(discipline);
     try {
       const content = emptyReportContent(project, name);
       // The project photo carries over from the most recent report.
       const previous = reports.find((r) => r.content.coverPhotoId);
       if (previous) content.coverPhotoId = previous.content.coverPhotoId;
-      const id = await startCaReport(projectNumber, content);
-      caNavigate(caReportPath(projectNumber, id));
+      const id = await startCaReport(projectNumber, content, { discipline, createdByName: name || undefined });
+      caNavigate(caReportPath(projectNumber, id, "capture"));
     } catch (error) {
       notifyError("Could not start the report", error);
-      setStarting(false);
+      setStarting(null);
     }
   }
 
+  const unassigned = reports.filter((r) => !r.discipline);
+
   return (
-    <Stack gap="4">
-      <Button colorPalette="brand" size="xl" minH="64px" onClick={newReport} loading={starting} data-print="hide">
-        <LuPlus /> New report
-      </Button>
-      <Text fontSize="sm" color="fg.muted">
-        Tip: on the Capture tab, select photos and choose “Create report” to start a report with them already in it.
-      </Text>
+    <Stack gap={{ base: 6, md: 8 }}>
       {!serverReachable && (
         <Text fontSize="sm" color="fg.muted">
           Offline — showing reports on this device.
@@ -61,12 +64,77 @@ export function CaReportList() {
           <Spinner size="sm" color="brand.solid" />
           <Text color="fg.muted">Loading reports…</Text>
         </HStack>
-      ) : reports.length === 0 ? (
-        <EmptyState
-          icon={<LuFileText />}
-          title="No reports yet"
-          description="Start a Field Observation Report for a site visit. It saves on this device as you type."
-        />
+      ) : (
+        <>
+          {CA_DISCIPLINES.map((discipline) => (
+            <DisciplineSection
+              key={discipline}
+              discipline={discipline}
+              title={CA_DISCIPLINE_LABELS[discipline]}
+              projectNumber={projectNumber}
+              reports={reports.filter((r) => r.discipline === discipline)}
+              starting={starting === discipline}
+              disabled={starting !== null}
+              onStart={() => void newReport(discipline)}
+            />
+          ))}
+          {unassigned.length > 0 && (
+            <DisciplineSection title="Unassigned" projectNumber={projectNumber} reports={unassigned} />
+          )}
+        </>
+      )}
+    </Stack>
+  );
+}
+
+function DisciplineSection({
+  discipline,
+  title,
+  projectNumber,
+  reports,
+  starting = false,
+  disabled = false,
+  onStart,
+}: {
+  discipline?: CaDiscipline;
+  title: string;
+  projectNumber: string;
+  reports: CaReportListItem[];
+  starting?: boolean;
+  disabled?: boolean;
+  /** Absent for the "Unassigned" group, which cannot start reports. */
+  onStart?: () => void;
+}) {
+  const headingId = `ca-discipline-${discipline ?? "unassigned"}`;
+  return (
+    <Stack as="section" gap="3" aria-labelledby={headingId} data-testid={headingId}>
+      <HStack justify="space-between" gap="3" wrap="wrap" borderBottomWidth="1px" borderColor="line" pb="2">
+        <HStack gap="2">
+          <Text id={headingId} as="h2" fontSize={{ base: "lg", md: "xl" }} fontWeight="semibold" color="brand.fg">
+            {title}
+          </Text>
+          <Badge variant="subtle" size="md">
+            {reports.length}
+          </Badge>
+        </HStack>
+        {onStart && (
+          <Button
+            colorPalette="brand"
+            size="lg"
+            onClick={onStart}
+            loading={starting}
+            disabled={disabled && !starting}
+            data-print="hide"
+            aria-label={`Start a new ${title} report`}
+          >
+            <LuPlus /> Start new report
+          </Button>
+        )}
+      </HStack>
+      {reports.length === 0 ? (
+        <Text fontSize="sm" color="fg.muted">
+          No {title} reports yet.
+        </Text>
       ) : (
         <Stack gap="2" data-testid="ca-report-list">
           {reports.map((r) => (
@@ -95,7 +163,7 @@ function ReportRow({ projectNumber, report }: { projectNumber: string; report: C
           <Stack gap="1" minW="0">
             <HStack gap="2" wrap="wrap">
               <Text fontWeight="semibold" color="brand.fg">
-                Report {report.reportNumber ?? "(not synced yet)"}
+                {report.reportNumber ? `Report ${report.reportNumber}` : "Draft (not synced yet)"}
               </Text>
               <CaReportStateBadge state={report.state} latestRevision={report.latestRevision} />
               {deficient && (
@@ -103,6 +171,16 @@ function ReportRow({ projectNumber, report }: { projectNumber: string; report: C
                   Deficient items
                 </Badge>
               )}
+            </HStack>
+            <HStack gap="1.5" fontSize="sm" color="fg.muted" wrap="wrap">
+              {report.createdByName && (
+                <>
+                  <LuUser aria-hidden />
+                  <Text data-testid="ca-report-row-author">Started by {report.createdByName}</Text>
+                  <Text aria-hidden>·</Text>
+                </>
+              )}
+              <Text>Last edited {edited(report.updatedAt)}</Text>
             </HStack>
             <Text fontSize="sm" color="fg.muted">
               Visited {formatLongDate(report.content.dateVisited) || "—"} · {report.content.items.length} item

@@ -29,3 +29,16 @@ export async function currentUser(): Promise<string> {
 
   return session.upn;
 }
+
+/**
+ * The display name of the signed-in user ("Jane Smith"), for showing who
+ * started a record. Falls back to the UPN when the session has no name.
+ */
+export async function currentUserName(): Promise<string> {
+  const store = await cookies();
+  const session = await readSessionToken(store.get(SESSION_COOKIE)?.value);
+  if (!session) {
+    throw new Error("No signed-in user for this request.");
+  }
+  return session.name?.trim() || session.upn;
+}

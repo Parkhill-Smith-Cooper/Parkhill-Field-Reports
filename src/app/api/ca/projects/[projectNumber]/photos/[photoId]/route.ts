@@ -16,7 +16,7 @@ import type { CaPhoto } from "@/types/ca";
  *
  * Multipart body:
  * - `meta` (required): JSON with caption, fileName, takenAt, clientUpdatedAt,
- *   optional pinId, width, height, deleted (a tombstone: the record and file
+ *   optional pinId, reportId (kept from the first sync), width, height, deleted (a tombstone: the record and file
  *   are kept so the deletion reaches every device and issued reports keep
  *   their copy).
  * - `file` (required the first time only): the JPEG the browser already
@@ -54,7 +54,7 @@ export async function PUT(request: Request, { params }: Params) {
     if (problem) return apiError(problem, 400);
     const m = meta as Pick<
       CaPhoto,
-      "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "width" | "height" | "deleted"
+      "caption" | "fileName" | "takenAt" | "clientUpdatedAt" | "pinId" | "reportId" | "width" | "height" | "deleted"
     >;
 
     const existing = await repo.photos.get(p.projectNumber, photoId);
@@ -78,6 +78,8 @@ export async function PUT(request: Request, { params }: Params) {
     }
 
     const now = new Date().toISOString();
+    // The report a photo belongs to is fixed by its first sync.
+    const reportId = existing ? existing.reportId : m.reportId || undefined;
     const photo = await repo.photos.upsert({
       id: photoId,
       projectNumber: p.projectNumber,
@@ -86,6 +88,7 @@ export async function PUT(request: Request, { params }: Params) {
       caption: m.caption,
       takenAt: m.takenAt,
       ...(m.pinId ? { pinId: m.pinId } : {}),
+      ...(reportId ? { reportId } : {}),
       ...(m.width ? { width: m.width } : {}),
       ...(m.height ? { height: m.height } : {}),
       ...(m.deleted ? { deleted: true } : {}),

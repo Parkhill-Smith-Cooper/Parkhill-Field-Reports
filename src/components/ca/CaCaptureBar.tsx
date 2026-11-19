@@ -26,12 +26,15 @@ const noopSubscribe = () => () => {};
 export function CaCaptureBar({
   projectNumber,
   pinId,
+  reportId,
   allowRapid = true,
   onCaptured,
 }: {
   projectNumber: string;
   /** File new photos under this floor-plan pin. */
   pinId?: string;
+  /** File new photos under this report. */
+  reportId?: string;
   /** Offer Rapid capture (its full-screen camera cannot open inside a dialog). */
   allowRapid?: boolean;
   onCaptured?: (photoIds: string[]) => void;
@@ -50,7 +53,7 @@ export function CaCaptureBar({
     if (files.length === 0) return [];
     setSaving((n) => n + files.length);
     try {
-      const result = await captureFiles(projectNumber, files, { pinId });
+      const result = await captureFiles(projectNumber, files, { pinId, reportId });
       for (const failure of result.failed) {
         notifyError(`Could not save ${failure.name}`, new Error(failure.error));
       }

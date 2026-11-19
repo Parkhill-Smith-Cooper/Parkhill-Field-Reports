@@ -1,50 +1,31 @@
-import type { Page } from "@playwright/test";
-
 import {
   createCaProject,
+  dropPinAt,
+  importMockSheet,
   makeJpeg,
   serverDrawings,
   serverPhotosWithPins,
   serverPins,
-  waitForOfflineReady,
+  caReportsPath,
+  openReportStep,
+  startCaReport,
+  waitForCached,
 } from "./fixtures/ca";
-import { expect, test } from "./fixtures/auth";
+import type { APIRequestContext, BrowserContext, Locator } from "@playwright/test";
+
+import { expect, signIn, test } from "./fixtures/auth";
 
 /**
- * Phase 3: drawings (import, PDF upload), pins with photos, offline pins, and
- * the Site Route tab with its Start Tracking placeholder.
+ * Phase 3: drawings (import, drawing-set upload with AI sheet names), pins with photos, offline pins, and
+ * a report's Site Route step with its Start Tracking placeholder.
  */
 
 const num = (base: string, project: string) => `E2E-${base}-${project.toUpperCase()}`;
-const path = (n: string, tab = "capture") => `/field-reports/${n}/${tab}`;
-
-async function importMockSheet(page: Page, sheet = "A-101") {
-  await page.getByRole("button", { name: "Add drawing" }).first().click();
-  const dialog = page.getByRole("dialog");
-  const row = dialog.getByTestId("ca-offered-drawings").locator("div", { hasText: sheet }).filter({ has: page.getByRole("button", { name: "Import" }) }).last();
-  await row.getByRole("button", { name: "Import" }).click();
-  await expect(dialog.getByTestId("ca-drawing-preview")).toBeVisible();
-  await dialog.getByRole("button", { name: "Add drawing" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByTestId("ca-drawing-viewer")).toBeVisible();
-}
-
-/** Drops a pin at fractions of the sheet and returns the open pin sheet. */
-async function dropPinAt(page: Page, fx: number, fy: number) {
-  await page.getByRole("button", { name: "Drop pin" }).click();
-  await expect(page.getByTestId("ca-drawing-viewer")).toHaveAttribute("data-drop-mode", "on");
-  const sheet = page.getByTestId("ca-drawing-sheet");
-  const box = (await sheet.boundingBox())!;
-  await sheet.click({ position: { x: box.width * fx, y: box.height * fy } });
-  const pinSheet = page.getByTestId("ca-pin-sheet");
-  await expect(pinSheet).toBeVisible();
-  return pinSheet;
-}
 
 test("import a sheet, drop a pin, take photos into it", async ({ page }, info) => {
   const project = num("PIN", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(path(project));
+  await startCaReport(page, project);
 
   await expect(page.getByText("No floor plans yet")).toBeVisible();
   await importMockSheet(page);
@@ -63,7 +44,9 @@ test("import a sheet, drop a pin, take photos into it", async ({ page }, info) =
   // On the drawing and in the photo grid.
   await expect(page.getByTestId("ca-pin")).toHaveCount(1);
   await expect(page.getByTestId("ca-pin")).toHaveAccessibleName(/Mech room 110, 1 photo/);
-  await expect(page.getByTestId("ca-photo-pin")).toHaveText("Mech room 110");
+  // The Photos list groups the photo under its pin.
+  await expect(page.getByTestId("ca-photo-group-title")).toHaveText(["Mech room 110"]);
+  await expect(page.getByTestId("ca-photo-group").getByTestId("ca-photo-tile")).toHaveCount(1);
 
   // Synced once, with the photo filed under the pin.
   await expect(page.locator('[data-testid="ca-pin"][data-sync="synced"]')).toHaveCount(1);
@@ -78,45 +61,256 @@ test("import a sheet, drop a pin, take photos into it", async ({ page }, info) =
   await expect(page.getByTestId("ca-pin")).toHaveCount(1);
 });
 
-test("upload a PDF and choose the floor-plan page", async ({ page, context }, info) => {
-  const project = num("PDF", info.project.name);
-  await createCaProject(page.request, project);
-
-  // A real two-page PDF, made by the browser.
+/** A real three-page drawing set, made by the browser, with a title block on each page. */
+async function makeDrawingSet(context: BrowserContext): Promise<Buffer> {
+  const sheet = (number: string, title: string, last = false) => `
+    <div style="position:relative;height:7.9in;${last ? "" : "page-break-after:always"}">
+      <div style="position:absolute;left:0.3in;top:2in;font:40px Arial">${title.toUpperCase()} DRAWING AREA</div>
+      <div style="position:absolute;right:0.2in;bottom:0.2in;width:2.6in;border:2px solid #333;padding:6px;font:12px Arial">
+        <div>SHEET TITLE</div>
+        <div style="font:bold 18px Arial">${title.toUpperCase()}</div>
+        <div>PROJECT NO. 45371.25.01</div>
+        <div style="font:bold 40px Arial">${number}</div>
+      </div>
+    </div>`;
   const maker = await context.newPage();
   await maker.setContent(
-    `<div style="height:4in;font:48px Arial;page-break-after:always">COVER SHEET</div>
-     <div style="height:4in;border:6px solid #333;font:48px Arial">LEVEL 2 FLOOR PLAN</div>`,
+    `<style>@page{margin:0}body{margin:0}</style>` +
+      sheet("G-001", "Cover Sheet") +
+      sheet("A-101", "Level 1 Floor Plan") +
+      sheet("A-102", "Level 2 Floor Plan", true),
   );
   const pdf = await maker.pdf({ format: "Letter", landscape: true });
   await maker.close();
+  return pdf;
+}
 
-  await page.goto(path(project));
+const sheetRows = (dialog: Locator) => dialog.getByTestId("ca-set-sheet");
+
+async function serverSets(request: APIRequestContext, projectNumber: string) {
+  const response = await request.get(`/api/ca/projects/${encodeURIComponent(projectNumber)}/drawing-sets`);
+  return (
+    (await response.json()) as {
+      sets: {
+        id: string;
+        fileName: string;
+        source?: string;
+        externalRef?: string;
+        revisionLabel?: string;
+        sheets: { page: number; sheetNumber: string; sheetName: string; naming: string }[];
+      }[];
+    }
+  ).sets;
+}
+
+test("drawing set: stored on the server, named by AI, edited, and shared across devices", async ({ page, context, browser, baseURL }, info) => {
+  const project = num("SET", info.project.name);
+  await createCaProject(page.request, project);
+  const pdf = await makeDrawingSet(context);
+
+  // Device 1 uploads the set. Sheets are named by the MOCK reader
+  // (CA_SHEET_NAMING=mock in playwright.config.ts): nothing reaches OpenAI.
+  await startCaReport(page, project);
   await page.getByRole("button", { name: "Add drawing" }).first().click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByTestId("ca-drawing-input").setInputFiles({ name: "CD_Set.pdf", mimeType: "application/pdf", buffer: pdf });
-  const pageSelect = dialog.getByTestId("ca-drawing-page");
-  await expect(pageSelect).toBeVisible({ timeout: 30_000 });
-  await expect(dialog.getByText("This PDF has 2 pages.", { exact: false })).toBeVisible();
-  await pageSelect.selectOption("2");
-  await dialog.getByLabel("Title").fill("Level 2 Floor Plan");
-  await dialog.getByLabel("Sheet number").fill("A-102");
-  await dialog.getByRole("button", { name: "Add drawing" }).click();
+  await expect(dialog.getByTestId("ca-drawing-input")).toHaveAttribute("accept", /application\/pdf/);
+  await dialog.getByTestId("ca-drawing-input").setInputFiles({ name: "CD Set.pdf", mimeType: "application/pdf", buffer: pdf });
 
-  await expect(page.getByTestId("ca-drawing-viewer")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText("PDF page 2 of 2")).toBeVisible();
+  // Every page is a sheet, labelled <sheet number> - <sheet name>.
+  await expect(sheetRows(dialog)).toHaveCount(3, { timeout: 30_000 });
+  await expect(dialog.getByTestId("ca-set-sheet-label")).toHaveText(
+    ["G-001 - Cover Sheet", "A-101 - Level 1 Floor Plan", "A-102 - Level 2 Floor Plan"],
+    { timeout: 30_000 },
+  );
+  // Stored on the server: the PDF in the file store, the names on the set.
+  await expect
+    .poll(async () => (await serverSets(page.request, project))[0]?.sheets.map((s) => s.naming))
+    .toEqual(["ai", "ai", "ai"]);
+
+  // Correct a name.
+  const third = sheetRows(dialog).nth(2);
+  await third.getByRole("button", { name: /Edit name of/ }).click();
+  await third.getByLabel("Sheet number").fill("A-102");
+  await third.getByLabel("Sheet name").fill("Level 2 Floor Plan - East");
+  await third.getByRole("button", { name: "Save name" }).click();
+  await expect(third.getByTestId("ca-set-sheet-label")).toHaveText("A-102 - Level 2 Floor Plan - East");
+
+  // Add it: rendered on this device and uploaded as a drawing, linked to the set.
+  await third.getByRole("button", { name: "Add" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByTestId("ca-drawing-viewer")).toBeVisible();
+  await expect(page.getByText("PDF page 3 of 3")).toBeVisible();
+  await expect(page.getByTestId("ca-drawing-select").locator("option:checked")).toHaveText("A-102 - Level 2 Floor Plan - East");
+  const [set] = await serverSets(page.request, project);
   expect(await serverDrawings(page.request, project)).toMatchObject([
-    { title: "Level 2 Floor Plan", fileType: "pdf", page: 2, pageCount: 2, source: "upload" },
+    {
+      title: "Level 2 Floor Plan - East",
+      sheetNumber: "A-102",
+      fileType: "pdf",
+      page: 3,
+      pageCount: 3,
+      source: "upload",
+      drawingSetId: set.id,
+    },
   ]);
+
+  // Device 2: a separate browser with nothing stored. Same set, same names,
+  // and its sheets render from the stored PDF.
+  const other = await browser.newContext({ ...info.project.use });
+  await signIn(other, baseURL!);
+  const second = await other.newPage();
+  await startCaReport(second, project);
+  await second.getByRole("button", { name: "Add drawing" }).first().click();
+  const otherDialog = second.getByRole("dialog");
+  await expect(otherDialog.getByTestId("ca-set-sheet-label")).toHaveText([
+    "G-001 - Cover Sheet",
+    "A-101 - Level 1 Floor Plan",
+    "A-102 - Level 2 Floor Plan - East",
+  ]);
+  await expect(sheetRows(otherDialog).nth(2).getByRole("button", { name: "Added" })).toBeDisabled();
+  await sheetRows(otherDialog).nth(1).getByRole("button", { name: "Add" }).click();
+  await expect(second.getByRole("dialog")).toHaveCount(0, { timeout: 30_000 });
+  await expect(second.getByText("PDF page 2 of 3")).toBeVisible();
+  await other.close();
+  await expect.poll(async () => (await serverDrawings(page.request, project)).map((d) => d.page).sort()).toEqual([2, 3]);
+});
+
+test("drawing set from the CA application: imported as a set, marked added, sheets added from it", async ({ page, context }, info) => {
+  const project = num("SETSRC", info.project.name);
+  await createCaProject(page.request, project);
+  const pdf = await makeDrawingSet(context);
+  // The source offers its current set as one PDF, as the CA application's
+  // Document Control does. Intercepted in the browser only; the server's
+  // configured source stays the mock one (whose sheet id is reused here, so
+  // the server's own "imported" marking is checked below).
+  const ref = "mock-sheet-a101";
+  await page.route("**/source-drawings**", (route) => {
+    if (new URL(route.request().url()).searchParams.get("ref") === ref) {
+      return route.fulfill({ body: pdf, contentType: "application/pdf" });
+    }
+    return route.fulfill({
+      json: {
+        source: "mock",
+        drawings: [
+          {
+            externalRef: ref,
+            title: "100% CD",
+            revisionLabel: "v3 — 100% CD",
+            isLatestApproved: true,
+            fileType: "pdf",
+            fileName: "CD Set.pdf",
+            sizeBytes: pdf.length,
+            imported: false,
+          },
+        ],
+      },
+    });
+  });
+
+  await startCaReport(page, project);
+  await page.getByRole("button", { name: "Add drawing" }).first().click();
+  const dialog = page.getByRole("dialog");
+  const offered = dialog.getByTestId("ca-offered-drawings");
+  await expect(offered).toContainText("Drawing set: 100% CD");
+  await expect(offered).toContainText("CD Set.pdf");
+  await expect(offered).toContainText("Latest approved (per source)");
+  await offered.getByRole("button", { name: "Import drawing set 100% CD" }).click();
+
+  // Stored like an uploaded set: every page a sheet, named from its title block.
+  await expect(sheetRows(dialog)).toHaveCount(3, { timeout: 30_000 });
+  await expect(dialog.getByTestId("ca-sheet-set")).toContainText("Drawing set from the CA application");
+  await expect(dialog.getByTestId("ca-set-revision")).toHaveText("v3 — 100% CD");
+  await expect(offered.getByRole("button", { name: "Added" })).toBeDisabled();
+  await expect(dialog.getByTestId("ca-set-sheet-label")).toHaveText(
+    ["G-001 - Cover Sheet", "A-101 - Level 1 Floor Plan", "A-102 - Level 2 Floor Plan"],
+    { timeout: 30_000 },
+  );
+  const [set] = await serverSets(page.request, project);
+  expect(set).toMatchObject({ fileName: "CD Set.pdf", source: "mock", externalRef: ref, revisionLabel: "v3 — 100% CD" });
+
+  // The server marks that version as imported for every device.
+  const listed = await page.request.get(`/api/ca/projects/${project}/source-drawings`);
+  const offers = ((await listed.json()) as { drawings: { externalRef: string; imported: boolean }[] }).drawings;
+  expect(offers.find((d) => d.externalRef === ref)?.imported).toBe(true);
+
+  // A sheet of the imported set becomes a drawing, linked to the set.
+  await sheetRows(dialog).nth(1).getByRole("button", { name: "Add" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.getByText("PDF page 2 of 3")).toBeVisible();
+  expect(await serverDrawings(page.request, project)).toMatchObject([{ page: 2, drawingSetId: set.id }]);
+
+  // An origin from a source that is not configured is refused.
+  const refused = await page.request.put(`/api/ca/projects/${project}/drawing-sets/caset_e2e_wrong_source`, {
+    data: {
+      fileName: "set.pdf",
+      blockCount: 1,
+      pageCount: 1,
+      sheets: [{ page: 1, sheetNumber: "", sheetName: "", naming: "guess" }],
+      source: "ca-app",
+      externalRef: "v9",
+    },
+  });
+  expect(refused.status()).toBe(400);
+});
+
+test("drawing set without AI: guesses are kept, sheets named by hand, set removed", async ({ page, context }, info) => {
+  const project = num("SETNOAI", info.project.name);
+  await createCaProject(page.request, project);
+  const pdf = await makeDrawingSet(context);
+  await page.route("**/drawing-sets/*/sheet-names", (route) =>
+    route.fulfill({
+      status: 503,
+      json: { error: "Automatic sheet naming is not set up. Enter the sheet numbers and names yourself." },
+    }),
+  );
+
+  await startCaReport(page, project);
+  await page.getByRole("button", { name: "Add drawing" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByTestId("ca-drawing-input").setInputFiles({ name: "CD Set.pdf", mimeType: "application/pdf", buffer: pdf });
+
+  await expect(dialog.getByTestId("ca-set-naming")).toContainText("Automatic sheet naming is not set up", { timeout: 30_000 });
+  // The sheet numbers were still read from the title blocks on the device.
+  await expect(dialog.getByTestId("ca-set-sheet-label")).toHaveText(["G-001", "A-101", "A-102"]);
+
+  const row = sheetRows(dialog).nth(1);
+  await row.getByRole("button", { name: /Edit name of/ }).click();
+  await row.getByLabel("Sheet name").fill("Level 1 Floor Plan");
+  await row.getByRole("button", { name: "Save name" }).click();
+  await expect(row.getByTestId("ca-set-sheet-label")).toHaveText("A-101 - Level 1 Floor Plan");
+  await expect
+    .poll(async () => (await serverSets(page.request, project))[0]?.sheets[1])
+    .toMatchObject({ sheetName: "Level 1 Floor Plan", naming: "edited" });
+
+  // Removed from the project for everyone.
+  await dialog.getByRole("button", { name: "Drawing set options" }).click();
+  await page.getByRole("menuitem", { name: "Remove set from the project" }).click();
+  await expect(sheetRows(dialog)).toHaveCount(0);
+  await expect.poll(async () => (await serverSets(page.request, project)).length).toBe(0);
+});
+
+test("drawing set upload refuses a file that is not a PDF", async ({ page }, info) => {
+  const project = num("SETBAD", info.project.name);
+  await createCaProject(page.request, project);
+  const base = `/api/ca/projects/${project}/drawing-sets/caset_bad`;
+  const block = await page.request.put(`${base}/blocks/0`, {
+    multipart: { block: { name: "block-0", mimeType: "application/octet-stream", buffer: Buffer.from("not a pdf") } },
+  });
+  expect(block.status()).toBe(415);
+  const commit = await page.request.put(base, {
+    data: { fileName: "set.pdf", blockCount: 1, pageCount: 1, sheets: [{ page: 1, sheetNumber: "", sheetName: "", naming: "guess" }] },
+  });
+  expect(commit.status()).toBe(422);
+  expect(await serverSets(page.request, project)).toEqual([]);
 });
 
 test("offline: the drawing opens and pins dropped offline sync once", async ({ page, context }, info) => {
   const project = num("OPIN", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(path(project));
+  await startCaReport(page, project);
   await importMockSheet(page);
   await expect(page.getByText("Not saved for offline yet")).toHaveCount(0);
-  await waitForOfflineReady(page);
+  await waitForCached(page, caReportsPath(project));
 
   await context.setOffline(true);
   await page.reload();
@@ -139,7 +333,7 @@ test("offline: the drawing opens and pins dropped offline sync once", async ({ p
 test("site route orders stops by photo time; tracking is a disabled placeholder", async ({ page }, info) => {
   const project = num("ROUTE", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(path(project));
+  await startCaReport(page, project);
   await importMockSheet(page);
 
   for (const [label, fx, fy] of [["Library", 0.8, 0.2], ["Gym", 0.2, 0.7]] as const) {
@@ -153,7 +347,7 @@ test("site route orders stops by photo time; tracking is a disabled placeholder"
   // A pin without photos is not a stop.
   await (await dropPinAt(page, 0.5, 0.5)).getByRole("button", { name: "Done" }).click();
 
-  await page.getByRole("link", { name: "Site Route" }).click();
+  await openReportStep(page, "Site Route");
   const tracking = page.getByTestId("ca-tracking-placeholder");
   await expect(tracking.getByRole("button", { name: "Start Tracking" })).toBeDisabled();
   await expect(tracking).toContainText("Coming soon");
@@ -163,6 +357,6 @@ test("site route orders stops by photo time; tracking is a disabled placeholder"
   await expect(stops.nth(0)).toContainText("Library");
   await expect(stops.nth(1)).toContainText("Gym");
   await expect(page.getByTestId("ca-route-line")).toHaveCount(1);
-  await expect(page.getByText("1 pin has no photos yet")).toBeVisible();
+  await expect(page.getByText("1 pin has no photos in this report")).toBeVisible();
   await expect(page.getByTestId("ca-route-day").locator("option")).toHaveCount(2); // All dates + today
 });

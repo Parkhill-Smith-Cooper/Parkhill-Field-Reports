@@ -3,6 +3,7 @@ import "server-only";
 import { CaConflictError, isCaError, type CaRepository } from "@/lib/ca/contracts";
 import type { CaReport, CaReportRevision } from "@/types/ca";
 
+import { buildReportLocations } from "./reportLocations";
 import { referencedPhotoIds } from "./reportContent";
 import { buildRevision } from "./revisions";
 
@@ -68,11 +69,32 @@ export async function issueReport(input: {
   }
   const photoPaths = Object.fromEntries(photos.filter((p) => !p.deleted).map((p) => [p.id, p.filePath]));
 
+  // Freeze the Photo Locations pages: later pin moves or floor-plan changes
+  // must not change an issued report. A pin or floor plan still on a phone
+  // would print a section that is missing or blank, so refuse instead.
+  const [pins, drawings] = await Promise.all([repo.pins.list(projectNumber), repo.drawings.list(projectNumber)]);
+  const livePins = new Map(pins.filter((p) => !p.deleted).map((p) => [p.id, p]));
+  const drawingIds = new Set(drawings.map((d) => d.id));
+  const byId = new Map(photos.map((p) => [p.id, p]));
+  for (const id of referencedPhotoIds(report.draft)) {
+    const pinId = byId.get(id)?.pinId;
+    if (!pinId) continue;
+    const pin = livePins.get(pinId);
+    if (!pin && !pins.some((p) => p.id === pinId)) {
+      throw new CaConflictError("A pin in this report has not finished uploading. Sync this device, then issue again.");
+    }
+    if (pin && !drawingIds.has(pin.drawingId)) {
+      throw new CaConflictError("A floor plan in this report has not finished uploading. Sync this device, then issue again.");
+    }
+  }
+  const locations = buildReportLocations({ content: report.draft, photos, pins, drawings });
+
   const candidate = buildRevision({
     report,
     issuedBy,
     dateIssued: input.now ?? new Date(),
     photoPaths,
+    locations,
   });
 
   let revision: CaReportRevision;

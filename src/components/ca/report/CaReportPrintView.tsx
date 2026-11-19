@@ -7,8 +7,11 @@ import { LuArrowLeft, LuPrinter } from "react-icons/lu";
 import { CaStateLink } from "@/components/ca/CaStateLink";
 import { CaReportDocument } from "@/components/ca/report/CaReportDocument";
 import { useCaProject } from "@/context/CaProjectContext";
+import { useCaDrawings } from "@/hooks/ca/useCaDrawings";
 import { useCaPhotos } from "@/hooks/ca/useCaPhotos";
+import { useCaPins } from "@/hooks/ca/useCaPins";
 import { useCaReport } from "@/hooks/ca/useCaReports";
+import { buildReportLocations } from "@/lib/ca/reportLocations";
 import { caReportPath } from "@/lib/ca/routes";
 import { fetchCaRevision } from "@/services/ca/reportService";
 import type { CaReportRevision } from "@/types/ca";
@@ -62,8 +65,11 @@ function Loading({ label = "Preparing the report…" }: { label?: string }) {
 function DraftView({ projectNumber, reportId }: { projectNumber: string; reportId: string }) {
   const r = useCaReport(projectNumber, reportId);
   const { photos } = useCaPhotos(projectNumber);
+  const { pins } = useCaPins(projectNumber);
+  const { drawings } = useCaDrawings(projectNumber);
   if (!r.loaded || !r.content) return <Loading />;
   const urls = new Map(photos.map((p) => [p.id, p.src]));
+  const drawingUrls = new Map(drawings.map((d) => [d.id, d.src]));
   return (
     <CaReportDocument
       content={r.content}
@@ -71,6 +77,10 @@ function DraftView({ projectNumber, reportId }: { projectNumber: string; reportI
       reportNumber={r.report?.reportNumber ?? null}
       revision={null}
       dateIssued={null}
+      locations={{
+        list: buildReportLocations({ content: r.content, photos, pins, drawings }),
+        drawingUrl: (id) => drawingUrls.get(id) ?? null,
+      }}
     />
   );
 }
@@ -78,7 +88,7 @@ function DraftView({ projectNumber, reportId }: { projectNumber: string; reportI
 function RevisionView({ projectNumber, reportId, revision }: { projectNumber: string; reportId: string; revision: number }) {
   const [loaded, setLoaded] = useState<{
     key: string;
-    data?: { revision: CaReportRevision; photoUrls: Record<string, string> };
+    data?: { revision: CaReportRevision; photoUrls: Record<string, string>; drawingUrls?: Record<string, string> };
     error?: string;
   } | null>(null);
   const key = `${reportId}:${revision}`;
@@ -108,7 +118,7 @@ function RevisionView({ projectNumber, reportId, revision }: { projectNumber: st
       </Alert.Root>
     );
   }
-  const { revision: rev, photoUrls } = current.data;
+  const { revision: rev, photoUrls, drawingUrls = {} } = current.data;
   return (
     <CaReportDocument
       content={rev.content}
@@ -116,6 +126,8 @@ function RevisionView({ projectNumber, reportId, revision }: { projectNumber: st
       reportNumber={rev.reportNumber}
       revision={rev.revision}
       dateIssued={rev.dateIssued}
+      // As frozen at issue time; revisions issued before Photo Locations existed have none.
+      locations={rev.locations && { list: rev.locations, drawingUrl: (id) => drawingUrls[id] ?? null }}
     />
   );
 }

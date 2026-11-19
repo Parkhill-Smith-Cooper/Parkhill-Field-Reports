@@ -5,13 +5,14 @@ import { getCaDrawingSource, getCaRepository } from "@/repositories/ca";
 type Params = { params: Promise<{ projectNumber: string }> };
 
 /**
- * `GET /api/ca/projects/{p}/source-drawings` — sheets the configured drawing
- * source (mock today, the CA application later) offers for this project,
- * each marked if it has already been imported.
+ * `GET /api/ca/projects/{p}/source-drawings` — what the configured drawing
+ * source (the CA application's Document Control, or mock sheets) offers for
+ * this project, each marked if it has already been imported: as a drawing
+ * (a sheet) or as a drawing set still on the project (a PDF).
  *
- * `GET ...?ref={externalRef}` streams one sheet's file, which the browser
- * renders to a sheet image and uploads like any drawing. Doing the render in
- * the browser means PDFs from the CA application need no server-side PDF tooling.
+ * `GET ...?ref={externalRef}` streams one file. The browser reads it: a PDF
+ * becomes a drawing set (pages listed as sheets), an image becomes a drawing.
+ * Doing that in the browser means no server-side PDF tooling.
  */
 export async function GET(request: Request, { params }: Params) {
   return caRoute("load drawings from the CA application", async () => {
@@ -32,7 +33,7 @@ export async function GET(request: Request, { params }: Params) {
       const offered = await source.listLatest(p.projectNumber);
       if (!offered.some((d) => d.externalRef === ref)) return apiError("That drawing was not found.", 404);
       const file = await source.fetchFile(p.projectNumber, ref);
-      return new Response(Buffer.from(file.bytes), {
+      return new Response(file.bytes instanceof Uint8Array ? Buffer.from(file.bytes) : file.bytes, {
         headers: {
           "Content-Type": file.contentType,
           "X-Content-Type-Options": "nosniff",
@@ -42,11 +43,18 @@ export async function GET(request: Request, { params }: Params) {
       });
     }
 
-    const [offered, existing] = await Promise.all([
+    const [offered, existing, sets] = await Promise.all([
       source.listLatest(p.projectNumber),
       repo.drawings.list(p.projectNumber),
+      repo.drawingSets.list(p.projectNumber),
     ]);
-    const imported = new Set(existing.map((d) => d.externalRef).filter(Boolean));
+    const imported = new Set(
+      [
+        ...existing.map((d) => d.externalRef),
+        // A removed set can be imported again.
+        ...sets.filter((s) => !s.removed && s.source === source.kind).map((s) => s.externalRef),
+      ].filter(Boolean),
+    );
     return Response.json({
       source: source.kind,
       drawings: offered.map((d) => ({ ...d, imported: imported.has(d.externalRef) })),

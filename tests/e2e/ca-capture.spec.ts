@@ -1,19 +1,18 @@
-import { createCaProject, makeJpeg, serverPhotos, waitForOfflineReady } from "./fixtures/ca";
+import { caReportsPath, createCaProject, makeJpeg, serverPhotos, startCaReport, waitForCached } from "./fixtures/ca";
 import { mockCxApi } from "./fixtures/cxApi";
 import { expect, test } from "./fixtures/auth";
 
 /**
- * Phase 2: photo capture, captions, sync status, and offline capture that
- * survives a reload and syncs without duplicates.
+ * Phase 2: photo capture (in a report's Capture step), captions, sync status,
+ * and offline capture that survives a reload and syncs without duplicates.
  */
 
 const num = (base: string, project: string) => `E2E-${base}-${project.toUpperCase()}`;
-const capturePath = (n: string) => `/field-reports/${n}/capture`;
 
 test("choose photos: saved, synced once, captioned", async ({ page }, info) => {
   const project = num("CAP", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(capturePath(project));
+  await startCaReport(page, project);
 
   const a = await makeJpeg(page, "Area B columns");
   const b = await makeJpeg(page, "Beam connections", "#5c6670");
@@ -41,9 +40,11 @@ test("choose photos: saved, synced once, captioned", async ({ page }, info) => {
 test("offline capture survives a reload and syncs exactly once", async ({ page, context }, info) => {
   const project = num("OFF", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(capturePath(project));
+  await startCaReport(page, project);
   await expect(page.getByTestId("ca-sync-status")).toBeVisible();
-  await waitForOfflineReady(page);
+  await waitForCached(page, caReportsPath(project));
+  // The report's draft (saved when it was started) has synced.
+  await expect(page.getByTestId("ca-sync-status")).toHaveText(/All synced/, { timeout: 30_000 });
   await expect(page.getByTestId("ca-sync-status")).toBeVisible();
 
   const photo = await makeJpeg(page, "Taken offline", "#4b5d4b");
@@ -56,7 +57,7 @@ test("offline capture survives a reload and syncs exactly once", async ({ page, 
   // Close and reopen with no signal: the app shell loads from the service
   // worker and the photo is still there, still waiting.
   await page.reload();
-  await expect(page.getByRole("navigation", { name: "Project sections" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Report steps" })).toBeVisible();
   await expect(page.locator('[data-testid="ca-photo-tile"][data-sync="pending"]')).toHaveCount(1);
   expect(await page.evaluate(() => navigator.onLine)).toBe(false);
 
@@ -75,7 +76,7 @@ test("offline capture survives a reload and syncs exactly once", async ({ page, 
 test("the offline service worker never controls CX pages", async ({ page }, info) => {
   const project = num("SW", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(capturePath(project));
+  await startCaReport(page, project);
   await page.evaluate(async () => {
     await navigator.serviceWorker.ready;
   });
@@ -88,7 +89,7 @@ test("the offline service worker never controls CX pages", async ({ page }, info
 test("rapid capture takes several photos without leaving the app", async ({ page }, info) => {
   const project = num("RAP", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(capturePath(project));
+  await startCaReport(page, project);
 
   await page.getByRole("button", { name: "Rapid capture" }).click();
   const shutter = page.getByTestId("ca-rapid-shutter");
@@ -106,7 +107,7 @@ test("rapid capture takes several photos without leaving the app", async ({ page
 test("delete a photo: gone from the project, synced as a deletion", async ({ page }, info) => {
   const project = num("DEL", info.project.name);
   await createCaProject(page.request, project);
-  await page.goto(capturePath(project));
+  await startCaReport(page, project);
   await page.getByTestId("ca-library-input").setInputFiles([
     { name: "keep.jpg", mimeType: "image/jpeg", buffer: await makeJpeg(page, "Keep") },
     { name: "oops.jpg", mimeType: "image/jpeg", buffer: await makeJpeg(page, "Oops", "#5c6670") },

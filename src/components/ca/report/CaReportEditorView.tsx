@@ -1,24 +1,32 @@
 "use client";
 
-import { Box, Button, Dialog, HStack, Portal, Spinner, Stack, Text } from "@chakra-ui/react";
+import { Box, Button, Dialog, Grid, HStack, Portal, Spinner, Stack, Text } from "@chakra-ui/react";
 import { CaStateLink } from "@/components/ca/CaStateLink";
 import { useEffect, useRef, useState } from "react";
-import { LuArrowLeft, LuClock, LuCircleCheck, LuEye, LuFileCheck, LuTrash2 } from "react-icons/lu";
+import { LuClock, LuCircleCheck, LuEye, LuFileCheck, LuImagePlus, LuTrash2 } from "react-icons/lu";
 
 import { CaReportStateBadge } from "@/components/ca/CaReportStateBadge";
 import { CaReportDocument } from "@/components/ca/report/CaReportDocument";
+import { CaReportPhotoPanel } from "@/components/ca/report/CaReportPhotoPanel";
 import type { CaPhotoView } from "@/hooks/ca/useCaPhotos";
+import type { CaDrawingView } from "@/hooks/ca/useCaDrawings";
+import type { CaPinView } from "@/hooks/ca/useCaPins";
 import { EmptyState } from "@/components/EmptyState";
 import { notifyError, toaster } from "@/components/ui/toaster";
 import { useCaProject } from "@/context/CaProjectContext";
+import { useCaDrawings } from "@/hooks/ca/useCaDrawings";
 import { useCaPhotos } from "@/hooks/ca/useCaPhotos";
 import { useCaPins } from "@/hooks/ca/useCaPins";
 import { useCaReport } from "@/hooks/ca/useCaReports";
 import { caSync } from "@/lib/ca/offline/appSync";
 import { deleteLocalDraft, draftHasPendingSync, getLocalDraft } from "@/lib/ca/offline/draftStore";
+import { groupPhotosByPin, photoIdsInReport, type CaPhotoGroup } from "@/lib/ca/photoGroups";
 import { numberPins, pinName } from "@/lib/ca/pins";
+import { buildReportLocations } from "@/lib/ca/reportLocations";
 import { reportState } from "@/lib/ca/reportContent";
-import { formatLongDate } from "@/lib/ca/reportLayout";
+import { newCaItemId } from "@/lib/ca/ids";
+import { photosAvailableToReport } from "@/lib/ca/reportPhotos";
+import { formatLongDate, itemsFromPhotos } from "@/lib/ca/reportLayout";
 import { caNavigate, caProjectPath, caReportPrintPath } from "@/lib/ca/routes";
 import { deleteCaReport, issueCaReport } from "@/services/ca/reportService";
 import type { CaReportContent } from "@/types/ca";
@@ -26,7 +34,7 @@ import type { CaReportContent } from "@/types/ca";
 const SAVE_DELAY_MS = 400;
 
 /**
- * The report editor. Every change is saved on this device within a moment and
+ * The report editor (a report's Report step). Every change is saved on this device within a moment and
  * synced on its own, so the report can be written with no signal. Issuing
  * needs a connection: it freezes the reviewed version as an immutable
  * revision and stamps Date Issued on the server.
@@ -34,11 +42,15 @@ const SAVE_DELAY_MS = 400;
 export function CaReportEditorView({ reportId }: { reportId: string }) {
   const { projectNumber } = useCaProject();
   const r = useCaReport(projectNumber, reportId);
-  const { photos } = useCaPhotos(projectNumber);
+  const { photos: allPhotos } = useCaPhotos(projectNumber);
+  // This report's photos, plus older photos that belong to no report.
+  const photos = photosAvailableToReport(allPhotos, reportId);
   const { pins } = useCaPins(projectNumber);
+  const { drawings } = useCaDrawings(projectNumber);
 
   const numbers = numberPins(pins);
   const pinNames = new Map(pins.map((p) => [p.id, pinName(p, numbers.get(p.id))]));
+  const photoGroups = groupPhotosByPin({ photos, pins, pinNumbers: numbers, pinNames, drawings });
   const backHref = caProjectPath(projectNumber, "reports");
 
   if (r.notFound) {
@@ -103,15 +115,7 @@ export function CaReportEditorView({ reportId }: { reportId: string }) {
   return (
     <Stack gap={{ base: 5, md: 6 }}>
       <Stack gap="3">
-        <Button asChild variant="ghost" size="md" alignSelf="flex-start" px="1">
-          <CaStateLink href={backHref}>
-            <LuArrowLeft /> All reports
-          </CaStateLink>
-        </Button>
         <HStack gap="3" wrap="wrap">
-          <Text fontSize={{ base: "xl", md: "2xl" }} fontWeight="semibold" data-testid="ca-report-title">
-            {r.report ? `Report ${r.report.reportNumber}` : "New report"}
-          </Text>
           <CaReportStateBadge state={state} latestRevision={latestRevision} />
         </HStack>
         <HStack gap="1.5" fontSize="sm" color={r.syncState === "synced" ? "fg.muted" : "orange.600"} data-testid="ca-report-sync">
@@ -166,15 +170,20 @@ export function CaReportEditorView({ reportId }: { reportId: string }) {
       )}
 
       <Text fontSize="sm" color="fg.muted" data-print="hide">
-        Click any field on the report to type. Tap a photo box to take or add a photo. Changes save on this device as you go.
+        Click any field on the report to type. Tap a photo box to take or add a photo, or drag photos onto it from the
+        panel on the right. Changes save on this device as you go.
       </Text>
       <EditorBody
         key={reportId}
         initial={r.content}
         onSave={r.save}
         photos={photos}
+        photoGroups={photoGroups}
+        pins={pins}
+        drawings={drawings}
         pinNames={pinNames}
         projectNumber={projectNumber}
+        reportId={reportId}
         reportNumber={r.report?.reportNumber ?? null}
       />
 
@@ -188,14 +197,22 @@ function EditorBody({
   initial,
   onSave,
   photos,
+  photoGroups,
+  pins,
+  drawings,
   pinNames,
   projectNumber,
+  reportId,
   reportNumber,
 }: {
   initial: CaReportContent;
   onSave: (content: CaReportContent) => Promise<void>;
   photos: CaPhotoView[];
+  photoGroups: CaPhotoGroup<CaPhotoView>[];
+  pins: CaPinView[];
+  drawings: CaDrawingView[];
   projectNumber: string;
+  reportId: string;
   reportNumber: string | null;
   pinNames: Map<string, string>;
 }) {
@@ -239,16 +256,68 @@ function EditorBody({
     }, SAVE_DELAY_MS);
   }
 
+  // Photos taken in this report's Capture step that are not in the report yet.
+  const used = photoIdsInReport(content);
+  const unplaced = photos.filter((p) => p.reportId === reportId && !used.has(p.id));
+  function addUnplaced() {
+    const added = itemsFromPhotos({ photos: unplaced, pins, pinNames, newId: newCaItemId });
+    change({ ...content, items: [...content.items, ...added] });
+  }
+
   const urls = new Map(photos.map((p) => [p.id, p.src]));
+  const drawingUrls = new Map(drawings.map((d) => [d.id, d.src]));
+  const locations = buildReportLocations({ content, photos, pins, drawings });
   return (
-    <CaReportDocument
-      content={content}
-      photoUrl={(id) => urls.get(id) ?? null}
-      reportNumber={reportNumber}
-      revision={null}
-      dateIssued={null}
-      editing={{ onChange: change, projectNumber, photos, pinNames }}
-    />
+    <Stack gap="4">
+      {unplaced.length > 0 && (
+        <HStack
+          gap="3"
+          justify="space-between"
+          wrap="wrap"
+          bg="brand.subtle"
+          borderRadius="md"
+          px="4"
+          py="3"
+          data-print="hide"
+          data-testid="ca-unplaced-photos"
+        >
+          <Text fontWeight="medium" color="brand.fg">
+            {unplaced.length} photo{unplaced.length === 1 ? "" : "s"} from Capture {unplaced.length === 1 ? "is" : "are"} not
+            in the report yet.
+          </Text>
+          <Button colorPalette="brand" size="lg" onClick={addUnplaced}>
+            <LuImagePlus /> Add to report
+          </Button>
+        </HStack>
+      )}
+      {/* Wide screens: the report with the photo panel beside it. Below that the
+          panel is hidden; the photo boxes' menus offer the same photos. */}
+      <Grid templateColumns={{ base: "minmax(0, 1fr)", lg: "minmax(0, 1fr) 280px" }} gap="5" alignItems="start">
+        <CaReportDocument
+          content={content}
+          photoUrl={(id) => urls.get(id) ?? null}
+          reportNumber={reportNumber}
+          revision={null}
+          dateIssued={null}
+          locations={{ list: locations, drawingUrl: (id) => drawingUrls.get(id) ?? null }}
+          editing={{ onChange: change, projectNumber, reportId, photos, pinNames }}
+        />
+        <Box
+          display={{ base: "none", lg: "block" }}
+          data-print="hide"
+          position="sticky"
+          top="110px"
+          maxH="calc(100dvh - 130px)"
+          overflowY="auto"
+          borderWidth="1px"
+          borderColor="line"
+          borderRadius="lg"
+          p="4"
+        >
+          <CaReportPhotoPanel groups={photoGroups} dateVisited={content.dateVisited} usedIds={used} />
+        </Box>
+      </Grid>
+    </Stack>
   );
 }
 

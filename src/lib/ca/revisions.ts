@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 
 import type {
   CaReport,
+  CaReportLocation,
   CaReportRevision,
   CaRevisionSummary,
 } from "@/types/ca";
@@ -75,6 +76,8 @@ export function buildRevision(input: {
   dateIssued: Date;
   /** photoId → file path, for photos that exist in storage. */
   photoPaths: Record<string, string>;
+  /** The Photo Locations pages to freeze (see `buildReportLocations`). */
+  locations?: CaReportLocation[];
 }): CaReportRevision {
   const { report, issuedBy, dateIssued } = input;
   const revision = nextRevisionNumber(report.latestRevision);
@@ -90,6 +93,7 @@ export function buildRevision(input: {
 
   // A deep copy, so the stored snapshot shares nothing with the live draft.
   const content = structuredClone(report.draft);
+  const locations = input.locations?.length ? structuredClone(input.locations) : undefined;
 
   return {
     id: revisionId(report.id, revision),
@@ -101,7 +105,10 @@ export function buildRevision(input: {
     issuedBy,
     content,
     photoPaths: frozenPaths,
-    contentHash: contentHash({ content, photoPaths: frozenPaths }),
+    ...(locations && { locations }),
+    // Locations join the hash only when present, so revisions issued before
+    // location pages existed keep the hash they were issued with.
+    contentHash: contentHash(locations ? { content, photoPaths: frozenPaths, locations } : { content, photoPaths: frozenPaths }),
     draftUpdatedAt: report.draftUpdatedAt,
   };
 }

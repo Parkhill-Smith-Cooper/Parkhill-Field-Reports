@@ -3,8 +3,10 @@ import "server-only";
 import { CaConflictError, type CaRepository } from "@/lib/ca/contracts";
 import { formatReportNumber } from "@/lib/ca/reportContent";
 import { applyIssueMark, RevisionAlreadyExistsError } from "@/lib/ca/revisions";
+import { byRecentActivity, reportMatches } from "@/lib/ca/search";
 import type {
   CaDrawing,
+  CaDrawingSet,
   CaPhoto,
   CaPin,
   CaProject,
@@ -27,7 +29,7 @@ import type {
  * | ----------- | --------------------------------------------------------- |
  * | caProjects  | project (id = projectNumber)                              |
  * | caCapture   | photo, pin (id = device-generated id)                     |
- * | caDrawings  | drawing                                                   |
+ * | caDrawings  | drawing, drawingSet                                       |
  * | caReports   | report, revision (id = `{reportId}_r{n}`), counter        |
  *
  * Semantics match the mock repository exactly (same unit tests):
@@ -337,6 +339,45 @@ export function createCosmosCaRepository(containers: CaCosmosContainers): CaRepo
       },
     },
 
+    drawingSets: {
+      async list(projectNumber) {
+        return (await listByType<CaDrawingSet>(drawings, projectNumber, "drawingSet")).sort((a, b) =>
+          a.uploadedAt.localeCompare(b.uploadedAt),
+        );
+      },
+      async get(projectNumber, setId) {
+        const doc = await read<Typed<CaDrawingSet>>(drawings, setId, projectNumber);
+        return doc && doc.type === "drawingSet" ? clean<CaDrawingSet>(doc) : null;
+      },
+      async create(set) {
+        try {
+          const { resource } = await drawings.items.create({ ...set, type: "drawingSet" });
+          return clean<CaDrawingSet>(resource) ?? set;
+        } catch (error) {
+          if (status(error) !== 409) throw error;
+          // A retried create: return what is stored.
+          const stored = await read<Typed<CaDrawingSet>>(drawings, set.id, set.projectNumber);
+          if (!stored || stored.type !== "drawingSet") throw new CaConflictError("That drawing set id is taken.");
+          return clean<CaDrawingSet>(stored)!;
+        }
+      },
+      async updateSheets(projectNumber, setId, change) {
+        const doc = await read<Typed<CaDrawingSet>>(drawings, setId, projectNumber);
+        if (!doc || doc.type !== "drawingSet") return null;
+        return update<CaDrawingSet>(drawings, setId, projectNumber, (current) => ({
+          ...current,
+          sheets: change(current.sheets),
+        }));
+      },
+      async remove(projectNumber, setId, removedBy) {
+        const doc = await read<Typed<CaDrawingSet>>(drawings, setId, projectNumber);
+        if (!doc || doc.type !== "drawingSet") return null;
+        return update<CaDrawingSet>(drawings, setId, projectNumber, (current) =>
+          current.removed ? null : { ...current, removed: true, removedAt: now(), removedBy },
+        );
+      },
+    },
+
     reports: {
       async list(projectNumber) {
         return (await listByType<CaReport>(reports, projectNumber, "report")).sort((a, b) =>
@@ -344,6 +385,28 @@ export function createCosmosCaRepository(containers: CaCosmosContainers): CaRepo
         );
       },
       get: getReport,
+      async search(query, limit) {
+        // Cross-partition: search spans every project. CONTAINS(..., true) is
+        // case-insensitive; `reportMatches` re-applies the shared rule.
+        const { resources } = await reports.items
+          .query<CaReport & CosmosMeta & { type: string }>({
+            query:
+              "SELECT * FROM c WHERE c.type = @t AND (" +
+              "CONTAINS(c.reportNumber, @q, true) OR CONTAINS(c.projectNumber, @q, true) OR " +
+              "CONTAINS(c.createdByName, @q, true) OR CONTAINS(c.createdBy, @q, true) OR " +
+              "CONTAINS(c.discipline, @q, true) OR CONTAINS(c.draft.projectName, @q, true))",
+            parameters: [
+              { name: "@t", value: "report" },
+              { name: "@q", value: query },
+            ],
+          })
+          .fetchAll();
+        return resources
+          .map((r) => clean<CaReport>(r)!)
+          .filter((r) => reportMatches(r, query))
+          .sort(byRecentActivity)
+          .slice(0, limit);
+      },
       async create(input) {
         const existing = await getReport(input.projectNumber, input.id);
         if (existing) return existing; // idempotent retry

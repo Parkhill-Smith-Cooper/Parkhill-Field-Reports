@@ -2,17 +2,18 @@ import { apiError } from "@/lib/apiResponse";
 import { caRoute, projectParam } from "@/lib/ca/apiRoute";
 import { toSummary } from "@/lib/ca/revisions";
 import { validateReportContent } from "@/lib/ca/validation";
-import { currentUser } from "@/lib/currentUser";
+import { currentUser, currentUserName } from "@/lib/currentUser";
 import { isValidGeneratedId } from "@/lib/validation";
 import { getCaRepository } from "@/repositories/ca";
-import type { CaReportContent } from "@/types/ca";
+import { isCaDiscipline, type CaReportContent } from "@/types/ca";
 
 /**
  * One report.
  *
  * - `GET`: the report (with its working draft) and its issued revisions.
  * - `PUT`: idempotent create-or-save of the draft, keyed by the report id the
- *   device generated. Body: `{ draft, clientUpdatedAt, createdAt }`. The first
+ *   device generated. Body: `{ draft, clientUpdatedAt, createdAt, discipline? }`.
+ *   The discipline is fixed by the first PUT; later PUTs ignore it. The first
  *   PUT creates the report and assigns its number; later PUTs replace the
  *   draft only if `clientUpdatedAt` is newer (a late, older edit never wins).
  * - `DELETE`: only for a report that has never been issued.
@@ -55,6 +56,10 @@ export async function PUT(request: Request, { params }: Params) {
     if (!isIso(body.clientUpdatedAt) || !isIso(body.createdAt)) {
       return apiError("Invalid report timestamps.", 400);
     }
+    if (body.discipline !== undefined && !isCaDiscipline(body.discipline)) {
+      return apiError("Invalid discipline.", 400);
+    }
+    const discipline = isCaDiscipline(body.discipline) ? body.discipline : undefined;
     const draft = body.draft as CaReportContent;
 
     const repo = getCaRepository();
@@ -67,12 +72,14 @@ export async function PUT(request: Request, { params }: Params) {
       const report = await repo.reports.create({
         id: r.reportId,
         projectNumber: r.projectNumber,
+        ...(discipline ? { discipline } : {}),
         draft,
         latestRevision: null,
         hasUnissuedChanges: false,
         draftUpdatedAt: body.clientUpdatedAt,
         createdAt: body.createdAt,
         createdBy: await currentUser(),
+        createdByName: await currentUserName(),
         updatedAt: new Date().toISOString(),
       });
       return Response.json({ report }, { status: 201 });

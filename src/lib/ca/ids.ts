@@ -25,3 +25,4 @@ export const newCaPinId = () => prefixedId("capin");
 export const newCaReportId = () => prefixedId("carep");
 export const newCaItemId = () => prefixedId("caitem");
 export const newCaDrawingId = () => prefixedId("cadwg");
+export const newCaSheetSetId = () => prefixedId("caset");

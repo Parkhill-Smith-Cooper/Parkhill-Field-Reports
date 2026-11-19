@@ -10,7 +10,7 @@ import {
 } from "@azure/storage-blob";
 
 import { azureCredential } from "@/lib/azure/credential";
-import type { CaFileStore } from "@/lib/ca/contracts";
+import { MissingBlockError, type CaFileStore } from "@/lib/ca/contracts";
 import { isSafeFilePath } from "@/lib/ca/paths";
 
 /**
@@ -22,6 +22,11 @@ import { isSafeFilePath } from "@/lib/ca/paths";
  * own container (`AZURE_STORAGE_CA_CONTAINER`, default `ca-files`) in the
  * existing storage account (`AZURE_STORAGE_ACCOUNT`).
  *
+ * Drawing-set PDFs are too large for one request through the app, so they
+ * arrive as numbered blocks (`stageBlock`) and are committed as one block blob
+ * (`commitBlocks`, also create-only). Blocks never committed are discarded by
+ * Blob Storage after 7 days.
+ *
  * Files are immutable: `put` uses an "if none match *" condition, so an
  * existing path is never overwritten (a retried upload is a no-op, as in mock
  * mode).
@@ -29,7 +34,11 @@ import { isSafeFilePath } from "@/lib/ca/paths";
  * Needs, on the storage account: Storage Blob Data Contributor and Storage
  * Blob Delegator for the app's identity, and a CORS rule allowing GET from
  * the app's origin - the browser downloads drawing sheets with `fetch` to
- * keep them for offline use (photos shown in <img> do not need CORS).
+ * keep them for offline use, and reads drawing-set PDFs with pdf.js (photos
+ * shown in <img> do not need CORS). For pdf.js to fetch only the pages it
+ * needs, the rule should allow the `Range` request header and expose
+ * `Accept-Ranges`, `Content-Range` and `Content-Length`; without that it
+ * downloads the whole PDF instead, which still works.
  */
 
 const SAS_TTL_MINUTES = 15;
@@ -40,6 +49,9 @@ declare global {
   var __caBlobService: BlobServiceClient | undefined;
   var __caDelegationKey: { key: UserDelegationKey; expiresOn: number } | undefined;
 }
+
+/** Block ids must all be the same length: base64 of a zero-padded index. */
+const blockId = (index: number) => Buffer.from(`block-${String(index).padStart(6, "0")}`).toString("base64");
 
 function status(error: unknown): number | undefined {
   const s = (error as { statusCode?: unknown } | null)?.statusCode;
@@ -89,6 +101,37 @@ export function createBlobFileStore(options: { account: string; container: strin
         if (status(error) === 409 || status(error) === 412) return;
         throw error;
       }
+    },
+
+    async stageBlock(path, index, bytes) {
+      const blob = container().getBlockBlobClient(checked(path));
+      if (await blob.exists()) return;
+      await blob.stageBlock(blockId(index), bytes, bytes.length);
+    },
+
+    async commitBlocks(path, blockCount, contentType) {
+      const blob = container().getBlockBlobClient(checked(path));
+      if (!(await blob.exists())) {
+        const ids = Array.from({ length: blockCount }, (_, i) => blockId(i));
+        const staged = new Set(
+          ((await blob.getBlockList("uncommitted")).uncommittedBlocks ?? []).map((b) => b.name),
+        );
+        if (ids.some((id) => !staged.has(id))) throw new MissingBlockError();
+        try {
+          await blob.commitBlockList(ids, {
+            blobHTTPHeaders: {
+              blobContentType: contentType,
+              blobCacheControl: "private, max-age=31536000, immutable",
+            },
+            conditions: { ifNoneMatch: "*" },
+          });
+        } catch (error) {
+          // Committed concurrently by a retry: files are immutable, keep it.
+          if (status(error) !== 409 && status(error) !== 412) throw error;
+        }
+      }
+      const props = await blob.getProperties();
+      return { sizeBytes: props.contentLength ?? 0 };
     },
 
     async exists(path) {

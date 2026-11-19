@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { createMockFileStore } from "@/lib/ca/files/mockFileStore";
-import { caPhotoPath, isPathInProject, isSafeFilePath } from "@/lib/ca/paths";
+import { caDrawingSetPath, caPhotoPath, isPathInProject, isSafeFilePath } from "@/lib/ca/paths";
 import { itemNumber, reportState } from "@/lib/ca/reportContent";
 import { stableStringify } from "@/lib/ca/revisions";
 import { hasDeficientItems } from "@/lib/ca/status";
@@ -123,6 +123,30 @@ describe("CA file paths and the mock file store", () => {
       expect(await store.readUrl(p)).toBe(
         `/api/ca/files/${encodeURIComponent(PROJECT)}/photos/caph_1.jpg`,
       );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("joins staged blocks into one immutable file, in memory and on disk", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ca-blocks-"));
+    try {
+      for (const store of [createMockFileStore({ dataDir: null }), createMockFileStore({ dataDir: dir })]) {
+        const p = caDrawingSetPath(PROJECT, "caset_1");
+        await store.stageBlock(p, 1, new Uint8Array([4, 5]));
+        await store.stageBlock(p, 0, new Uint8Array([9]));
+        await store.stageBlock(p, 0, new Uint8Array([1, 2, 3])); // a retried block replaces it
+        expect(await store.exists(p)).toBe(false);
+        await expect(store.commitBlocks(p, 3, "application/pdf")).rejects.toMatchObject({ name: "MissingBlockError" });
+        expect(await store.commitBlocks(p, 2, "application/pdf")).toEqual({ sizeBytes: 5 });
+        expect(await store.get(p)).toEqual({ bytes: new Uint8Array([1, 2, 3, 4, 5]), contentType: "application/pdf" });
+        // Committed: further blocks and commits change nothing.
+        await store.stageBlock(p, 0, new Uint8Array([7]));
+        expect(await store.commitBlocks(p, 1, "application/pdf")).toEqual({ sizeBytes: 5 });
+        expect(Array.from((await store.get(p))!.bytes)).toEqual([1, 2, 3, 4, 5]);
+      }
+      const folder = path.join(dir, "files", PROJECT, "drawing-sets");
+      expect(fs.readdirSync(folder).some((f) => f.endsWith(".blocks"))).toBe(false);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

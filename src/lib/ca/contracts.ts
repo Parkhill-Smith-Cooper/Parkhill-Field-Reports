@@ -20,6 +20,8 @@
 
 import type {
   CaDrawing,
+  CaDrawingSet,
+  CaSetSheet,
   CaPhoto,
   CaPin,
   CaProject,
@@ -69,8 +71,32 @@ export interface CaDrawingStore {
   upsert(drawing: CaDrawing): Promise<CaDrawing>;
 }
 
+export interface CaDrawingSetStore {
+  /** Every set of the project, removed ones included, oldest first. */
+  list(projectNumber: string): Promise<CaDrawingSet[]>;
+  get(projectNumber: string, setId: string): Promise<CaDrawingSet | null>;
+  /** Create-only and idempotent on `id`: a retried create returns the stored set. */
+  create(set: CaDrawingSet): Promise<CaDrawingSet>;
+  /**
+   * Replaces the sheets with `change(current)`, atomically: concurrent AI
+   * results and engineer edits on other devices are never lost. Null if absent.
+   */
+  updateSheets(
+    projectNumber: string,
+    setId: string,
+    change: (sheets: CaSetSheet[]) => CaSetSheet[],
+  ): Promise<CaDrawingSet | null>;
+  /** Hides the set (a tombstone; the file is kept). Null if absent. */
+  remove(projectNumber: string, setId: string, removedBy: string): Promise<CaDrawingSet | null>;
+}
+
 export interface CaReportStore {
   list(projectNumber: string): Promise<CaReport[]>;
+  /**
+   * Reports in every project matching a normalized search (`reportMatches` in
+   * src/lib/ca/search.ts), most recently active first, at most `limit`.
+   */
+  search(query: string, limit: number): Promise<CaReport[]>;
   get(projectNumber: string, reportId: string): Promise<CaReport | null>;
   /**
    * Creates the report, assigning the next per-project `reportNumber`.
@@ -131,6 +157,7 @@ export interface CaRepository {
   photos: CaPhotoStore;
   pins: CaPinStore;
   drawings: CaDrawingStore;
+  drawingSets: CaDrawingSetStore;
   reports: CaReportStore;
 }
 
@@ -146,6 +173,18 @@ export interface CaFileStore {
   get(path: string): Promise<{ bytes: Uint8Array; contentType: string } | null>;
   /** A URL the signed-in browser can read the file from, valid for minutes. */
   readUrl(path: string): Promise<string>;
+  /**
+   * Large files (drawing-set PDFs) arrive in numbered blocks. A staged block
+   * is invisible until `commitBlocks`; staging the same block again replaces
+   * it. Does nothing once the file exists.
+   */
+  stageBlock(path: string, index: number, bytes: Uint8Array): Promise<void>;
+  /**
+   * Joins blocks `0..blockCount-1` into the file. Create-only, like `put`:
+   * if the file already exists it is left as it is. Returns the file size.
+   * Throws `MissingBlockError` when a block was never staged.
+   */
+  commitBlocks(path: string, blockCount: number, contentType: string): Promise<{ sizeBytes: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,10 +198,10 @@ export interface CaProjectSource {
 }
 
 /**
- * A drawing sheet as an upstream system describes it. How the CA application
- * decides which set is the latest *approved* one is not yet known - see
- * docs/ca-integration-contracts.md - so this contract carries the source's own
- * labels rather than inferring anything.
+ * A drawing as an upstream system describes it: one sheet (an image) or a
+ * whole drawing set (a PDF, imported as a drawing set whose pages are listed
+ * as sheets). The source says which set is the latest approved one; nothing
+ * here infers it. See docs/ca-integration-contracts.md.
  */
 export type CaSourceDrawing = {
   externalRef: string;
@@ -173,15 +212,18 @@ export type CaSourceDrawing = {
   isLatestApproved: boolean;
   fileType: "pdf" | "image";
   fileName: string;
+  /** File size, when the source states it. */
+  sizeBytes?: number;
 };
 
 export interface CaDrawingSource {
   readonly kind: "mock" | "ca-app";
   listLatest(projectNumber: string): Promise<CaSourceDrawing[]>;
+  /** A stream, so a large drawing set is passed through without being held in memory. */
   fetchFile(
     projectNumber: string,
     externalRef: string,
-  ): Promise<{ bytes: Uint8Array; contentType: string; fileName: string }>;
+  ): Promise<{ bytes: Uint8Array | ReadableStream<Uint8Array>; contentType: string; fileName: string }>;
 }
 
 /** Optional future server-side PDF generation for issued revisions. */
@@ -203,7 +245,8 @@ export type CaErrorName =
   | "CaConflictError"
   | "CaNotConfiguredError"
   | "RevisionAlreadyExistsError"
-  | "MissingPhotoError";
+  | "MissingPhotoError"
+  | "MissingBlockError";
 
 export function isCaError(error: unknown, name: CaErrorName): error is Error {
   return error instanceof Error && error.name === name;
@@ -220,5 +263,13 @@ export class CaNotConfiguredError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "CaNotConfiguredError";
+  }
+}
+
+/** A drawing-set upload was committed before all of its blocks arrived. */
+export class MissingBlockError extends Error {
+  constructor(message = "Part of the upload is missing. Upload the drawing set again.") {
+    super(message);
+    this.name = "MissingBlockError";
   }
 }
