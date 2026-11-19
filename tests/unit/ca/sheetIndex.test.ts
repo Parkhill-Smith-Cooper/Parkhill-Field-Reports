@@ -43,6 +43,17 @@ describe("title-block text", () => {
     expect(lines.indexOf("[14] PARKHILL")).toBeLessThan(lines.indexOf("[36] A-101"));
   });
 
+  it("on a crowded sheet, keeps the largest text (the sheet number at the bottom right) under the cap", () => {
+    const notes = Array.from({ length: 120 }, (_, i) => item(`GENERAL NOTE ${i + 1}`, 2300, 1700 - i * 12, 5));
+    const lines = titleBlockLines([...notes, item("A-101", 2400, 20, 36)], W, H);
+    expect(lines).toHaveLength(80);
+    expect(lines).toContain("[36] A-101");
+    expect(guessSheetNumber(lines)).toBe("A-101");
+    // Still top to bottom.
+    expect(lines[0]).toBe("[5] GENERAL NOTE 1");
+    expect(lines.at(-1)).toBe("[36] A-101");
+  });
+
   it("guesses the sheet number from the largest matching text", () => {
     expect(guessSheetNumber(titleBlockLines(floorPlanPage, W, H))).toBe("A-101");
     expect(guessSheetNumber(["[8] SHEET NO. M2.01", "[6] REV 1"])).toBe("M2.01");

@@ -46,7 +46,7 @@ export function fakeContainer(): CosmosContainerLike & { docs: Map<string, Recor
         docs.set(k, doc);
         return { resource: structuredClone(doc) as T & { _etag?: string } };
       },
-      query<T>(spec: { query: string; parameters: { name: string; value: string }[] }) {
+      query<T>(spec: { query: string; parameters: { name: string; value: string | number }[] }) {
         const param = (name: string) => spec.parameters.find((p) => p.name === name)?.value;
         return {
           async fetchAll() {
@@ -56,6 +56,25 @@ export function fakeContainer(): CosmosContainerLike & { docs: Map<string, Recor
             if (p !== undefined) list = list.filter((d) => d.projectNumber === p);
             if (t !== undefined) list = list.filter((d) => d.type === t);
             if (spec.query.includes("c.type = 'project'")) list = list.filter((d) => d.type === "project");
+            // Report search: CONTAINS(field, @q, true) over the fields the query names,
+            // ORDER BY c.updatedAt DESC and TOP @n, as Cosmos applies them.
+            const q = param("@q");
+            if (typeof q === "string") {
+              const fields = [...spec.query.matchAll(/CONTAINS\(c\.([\w.]+), @q, true\)/g)].map((m) => m[1]);
+              const at = (d: Record<string, unknown>, path: string) =>
+                path.split(".").reduce<unknown>((v, k) => (v as Record<string, unknown> | undefined)?.[k], d);
+              list = list.filter((d) =>
+                fields.some((f) => {
+                  const v = at(d, f);
+                  return typeof v === "string" && v.toLowerCase().includes(q.toLowerCase());
+                }),
+              );
+            }
+            if (spec.query.includes("ORDER BY c.updatedAt DESC")) {
+              list.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+            }
+            const n = param("@n");
+            if (spec.query.includes("TOP @n") && typeof n === "number") list = list.slice(0, n);
             if (spec.query.startsWith("SELECT c.id")) list = list.map((d) => ({ id: d.id }));
             return { resources: structuredClone(list) as T[] };
           },

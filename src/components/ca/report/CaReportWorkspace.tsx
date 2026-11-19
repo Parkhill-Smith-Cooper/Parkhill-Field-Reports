@@ -55,7 +55,12 @@ export function CaReportWorkspace({ reportId, step }: { reportId: string; step: 
 
       <CaReportSteps projectNumber={projectNumber} reportId={reportId} step={step} />
 
-      {step === "capture" ? (
+      {/* Capture and Site Route save photos and pins under this report's id, so they
+          mount only for a report that exists here (on this device or on the server).
+          The Report step shows its own "not found" and loading states. */}
+      {step !== "report" && (r.notFound || !r.loaded || !r.content) ? (
+        <CaReportEditorView reportId={reportId} />
+      ) : step === "capture" ? (
         <CaReportCaptureStep reportId={reportId} />
       ) : step === "route" ? (
         <CaReportRouteStep reportId={reportId} />

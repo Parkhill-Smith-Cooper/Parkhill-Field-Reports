@@ -17,7 +17,7 @@ import { useCaProject } from "@/context/CaProjectContext";
 import { useCaDrawings } from "@/hooks/ca/useCaDrawings";
 import { useCaPhotos } from "@/hooks/ca/useCaPhotos";
 import { useCaPins } from "@/hooks/ca/useCaPins";
-import { useCaReport } from "@/hooks/ca/useCaReports";
+import { useCaReport, useCaReports } from "@/hooks/ca/useCaReports";
 import { caSync } from "@/lib/ca/offline/appSync";
 import { deleteLocalDraft, draftHasPendingSync, getLocalDraft } from "@/lib/ca/offline/draftStore";
 import { groupPhotosByPin, photoIdsInReport, type CaPhotoGroup } from "@/lib/ca/photoGroups";
@@ -43,8 +43,12 @@ export function CaReportEditorView({ reportId }: { reportId: string }) {
   const { projectNumber } = useCaProject();
   const r = useCaReport(projectNumber, reportId);
   const { photos: allPhotos } = useCaPhotos(projectNumber);
-  // This report's photos, plus older photos that belong to no report.
-  const photos = photosAvailableToReport(allPhotos, reportId);
+  const reportList = useCaReports(projectNumber);
+  // The report list is complete only once loaded from a reachable server.
+  const knownReportIds =
+    reportList.loaded && reportList.serverReachable ? new Set(reportList.reports.map((x) => x.id)) : undefined;
+  // This report's photos, older photos that belong to no report, and photos of deleted reports.
+  const photos = photosAvailableToReport(allPhotos, reportId, knownReportIds);
   const { pins } = useCaPins(projectNumber);
   const { drawings } = useCaDrawings(projectNumber);
 
@@ -178,6 +182,7 @@ export function CaReportEditorView({ reportId }: { reportId: string }) {
         initial={r.content}
         onSave={r.save}
         photos={photos}
+        projectPhotos={allPhotos}
         photoGroups={photoGroups}
         pins={pins}
         drawings={drawings}
@@ -197,6 +202,7 @@ function EditorBody({
   initial,
   onSave,
   photos,
+  projectPhotos,
   photoGroups,
   pins,
   drawings,
@@ -208,6 +214,8 @@ function EditorBody({
   initial: CaReportContent;
   onSave: (content: CaReportContent) => Promise<void>;
   photos: CaPhotoView[];
+  /** Every photo in the project: photos already in the report render even if the picker would not offer them. */
+  projectPhotos: CaPhotoView[];
   photoGroups: CaPhotoGroup<CaPhotoView>[];
   pins: CaPinView[];
   drawings: CaDrawingView[];
@@ -264,9 +272,9 @@ function EditorBody({
     change({ ...content, items: [...content.items, ...added] });
   }
 
-  const urls = new Map(photos.map((p) => [p.id, p.src]));
+  const urls = new Map(projectPhotos.map((p) => [p.id, p.src]));
   const drawingUrls = new Map(drawings.map((d) => [d.id, d.src]));
-  const locations = buildReportLocations({ content, photos, pins, drawings });
+  const locations = buildReportLocations({ content, photos: projectPhotos, pins, drawings });
   return (
     <Stack gap="4">
       {unplaced.length > 0 && (

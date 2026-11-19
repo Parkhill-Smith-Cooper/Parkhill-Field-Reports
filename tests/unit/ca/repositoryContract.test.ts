@@ -108,7 +108,8 @@ describe.each(implementations)("CA repository contract: %s", (_name, make) => {
     expect(await ids("mock-2")).toEqual(["carep_s2"]);
     // Both are report 001 in their project; newest activity first.
     expect(await ids("001")).toEqual(["carep_s2", "carep_s1"]);
-    expect(await repo.reports.search("001", 1)).toHaveLength(1);
+    // The limit keeps the newest, not whichever came first.
+    expect((await repo.reports.search("001", 1)).map((r) => r.id)).toEqual(["carep_s2"]);
     expect(await ids("nobody")).toEqual([]);
   });
 

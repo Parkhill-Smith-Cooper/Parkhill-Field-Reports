@@ -76,19 +76,28 @@ export function titleBlockLines(items: PageTextItem[], width: number, height: nu
     }
   }
 
-  return lines
-    .map((l) => {
+  const texts = lines
+    .map((l, order) => {
       const text = l.parts
         .sort((a, b) => a.x - b.x)
         .map((p) => p.str.trim())
         .join(" ")
         .replace(/\s+/g, " ")
         .slice(0, MAX_LINE_LENGTH);
-      return { size: l.size, text };
+      return { order, size: l.size, text };
     })
-    .filter((l) => l.text)
-    .slice(0, MAX_LINES_PER_PAGE)
-    .map((l) => `[${Math.round(l.size)}] ${l.text}`);
+    .filter((l) => l.text);
+
+  // On a crowded sheet, keep the largest text (the sheet number is usually the
+  // largest, and often at the bottom right), then restore reading order.
+  const kept =
+    texts.length <= MAX_LINES_PER_PAGE
+      ? texts
+      : [...texts]
+          .sort((a, b) => b.size - a.size || a.order - b.order)
+          .slice(0, MAX_LINES_PER_PAGE)
+          .sort((a, b) => a.order - b.order);
+  return kept.map((l) => `[${Math.round(l.size)}] ${l.text}`);
 }
 
 /**

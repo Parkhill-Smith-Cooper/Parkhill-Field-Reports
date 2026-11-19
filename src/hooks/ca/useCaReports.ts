@@ -132,6 +132,8 @@ export function useCaReport(projectNumber: string, reportId: string) {
   const [serverState, setServerState] = useState<"loading" | "ok" | "missing" | "offline">("loading");
   // Set from callbacks (never during render); used when saving the first local copy.
   const serverCreatedAt = useRef<string | null>(null);
+  // Set alongside it: a first local copy of a report started elsewhere keeps its discipline and author.
+  const serverMeta = useRef<Pick<CaReport, "discipline" | "createdByName">>({});
 
   const readLocal = useCallback(
     () =>
@@ -146,6 +148,7 @@ export function useCaReport(projectNumber: string, reportId: string) {
       fetchCaReport(projectNumber, reportId).then(
         (result) => {
           serverCreatedAt.current = result.report.createdAt;
+          serverMeta.current = { discipline: result.report.discipline, createdByName: result.report.createdByName };
           setServer(result);
           setServerState("ok");
         },
@@ -179,6 +182,9 @@ export function useCaReport(projectNumber: string, reportId: string) {
         projectNumber,
         content: next,
         createdAt: existing?.createdAt ?? serverCreatedAt.current ?? new Date().toISOString(),
+        // Stored values win (saveLocalDraft keeps them); these fill a first copy.
+        discipline: serverMeta.current.discipline,
+        createdByName: serverMeta.current.createdByName,
       });
       setLocal(saved);
     },

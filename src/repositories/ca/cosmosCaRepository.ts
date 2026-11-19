@@ -54,7 +54,7 @@ export type CosmosContainerLike = {
   items: {
     create<T>(body: T): Promise<{ resource?: T & CosmosMeta }>;
     query<T>(
-      spec: { query: string; parameters: { name: string; value: string }[] },
+      spec: { query: string; parameters: { name: string; value: string | number }[] },
       options?: { partitionKey?: string },
     ): { fetchAll(): Promise<{ resources: T[] }> };
   };
@@ -387,17 +387,20 @@ export function createCosmosCaRepository(containers: CaCosmosContainers): CaRepo
       get: getReport,
       async search(query, limit) {
         // Cross-partition: search spans every project. CONTAINS(..., true) is
-        // case-insensitive; `reportMatches` re-applies the shared rule.
+        // case-insensitive; `reportMatches` re-applies the shared rule. Newest
+        // first and TOP in the query, so only `limit` reports are transferred.
         const { resources } = await reports.items
           .query<CaReport & CosmosMeta & { type: string }>({
             query:
-              "SELECT * FROM c WHERE c.type = @t AND (" +
+              "SELECT TOP @n * FROM c WHERE c.type = @t AND (" +
               "CONTAINS(c.reportNumber, @q, true) OR CONTAINS(c.projectNumber, @q, true) OR " +
               "CONTAINS(c.createdByName, @q, true) OR CONTAINS(c.createdBy, @q, true) OR " +
-              "CONTAINS(c.discipline, @q, true) OR CONTAINS(c.draft.projectName, @q, true))",
+              "CONTAINS(c.discipline, @q, true) OR CONTAINS(c.draft.projectName, @q, true)) " +
+              "ORDER BY c.updatedAt DESC",
             parameters: [
               { name: "@t", value: "report" },
               { name: "@q", value: query },
+              { name: "@n", value: limit },
             ],
           })
           .fetchAll();
