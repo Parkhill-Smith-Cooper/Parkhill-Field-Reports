@@ -6,11 +6,15 @@ import {
   type CaDrawingSource,
   type CaProjectSource,
   type CaSourceDrawing,
+  type CaSourceSpecSection,
+  type CaSpecSource,
 } from "@/lib/ca/contracts";
 import { azureCredential } from "@/lib/azure/credential";
 import { ccrPaths, mapCcrDrawings } from "@/lib/ca/ccrDrawings";
+import { ccrSpecPaths, mapCcrSpecSections } from "@/lib/ca/ccrSpecs";
 import { archProjectNumberFromWbs, mapCcrProjects } from "@/lib/ca/ccrProjects";
 import { caConfig } from "@/lib/ca/config";
+import { mockDrawingSetPdf } from "@/lib/ca/mockDrawingSetPdf";
 import { listVantagePointProjects } from "@/repositories/vantagepointRepository";
 import type { CaSourceProject } from "@/types/ca";
 
@@ -168,12 +172,67 @@ const MOCK_DRAWINGS: CaSourceDrawing[] = [
   },
 ];
 
+/**
+ * MOCK Document Control: which projects have a drawing set "published", and
+ * at which version. The sample projects, and any project numbered `DC-…`
+ * (end-to-end tests), start at version 1; every other project has none, so
+ * it shows the manual "Add drawing" path. Kept on `globalThis` like the mock
+ * repository; `publishMockDrawingSet` stands in for a coordinator publishing
+ * a new version.
+ */
+declare global {
+  var __caMockDocumentControl: Map<string, number> | undefined;
+}
+
+function mockVersions(): Map<string, number> {
+  globalThis.__caMockDocumentControl ??= new Map();
+  return globalThis.__caMockDocumentControl;
+}
+
+function mockSetVersion(projectNumber: string): number {
+  const published = mockVersions().get(projectNumber);
+  if (published !== undefined) return published;
+  return MOCK_PROJECTS.some((p) => p.projectNumber === projectNumber) || /^DC-/i.test(projectNumber) ? 1 : 0;
+}
+
+/** MOCK: a new version of the project's set (0 = none published). Returns the version. */
+export function publishMockDrawingSet(projectNumber: string, version = mockSetVersion(projectNumber) + 1): number {
+  mockVersions().set(projectNumber, version);
+  return version;
+}
+
+const mockSetRef = (projectNumber: string, version: number) => `mock-dc-${projectNumber}-v${version}`;
+const MOCK_SET_TITLE = "100% CD (MOCK)";
+
+function mockSetOffer(projectNumber: string): CaSourceDrawing | null {
+  const version = mockSetVersion(projectNumber);
+  if (version < 1) return null;
+  return {
+    externalRef: mockSetRef(projectNumber, version),
+    title: MOCK_SET_TITLE,
+    revisionLabel: `v${version} — ${MOCK_SET_TITLE}`,
+    isLatestApproved: true,
+    fileType: "pdf",
+    fileName: `${projectNumber} ${MOCK_SET_TITLE} v${version}.pdf`,
+  };
+}
+
 export const mockDrawingSource: CaDrawingSource = {
   kind: "mock",
-  async listLatest() {
-    return MOCK_DRAWINGS.map((d) => ({ ...d }));
+  async listLatest(projectNumber) {
+    const set = mockSetOffer(projectNumber);
+    return [...(set ? [set] : []), ...MOCK_DRAWINGS.map((d) => ({ ...d }))];
   },
-  async fetchFile(_projectNumber, externalRef) {
+  async fetchFile(projectNumber, externalRef) {
+    const match = /-v(\d+)$/.exec(externalRef);
+    if (match && externalRef === mockSetRef(projectNumber, Number(match[1]))) {
+      const version = Number(match[1]);
+      return {
+        bytes: mockDrawingSetPdf(`v${version} - ${MOCK_SET_TITLE}`),
+        contentType: "application/pdf",
+        fileName: `${projectNumber} ${MOCK_SET_TITLE} v${version}.pdf`,
+      };
+    }
     const sheet = MOCK_DRAWINGS.find((d) => d.externalRef === externalRef);
     if (!sheet) throw new Error(`No mock drawing ${externalRef}.`);
     return {
@@ -219,6 +278,110 @@ export const caAppDrawingSource: CaDrawingSource = {
       };
     } catch (error) {
       unavailable("drawing file", error, "The drawing set could not be downloaded from the CA application.");
+    }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Specifications
+// ---------------------------------------------------------------------------
+
+/** MOCK spec sections, offered for the same projects that have a mock drawing set. */
+const MOCK_SPEC_SECTIONS = [
+  { sectionKey: "033000", sectionNumber: "03 30 00", title: "Cast-in-Place Concrete (sample)" },
+  { sectionKey: "051200", sectionNumber: "05 12 00", title: "Structural Steel Framing (sample)" },
+  { sectionKey: "092900", sectionNumber: "09 29 00", title: "Gypsum Board (sample)" },
+];
+
+declare global {
+  var __caMockSpecRevisions: Map<string, number> | undefined;
+}
+
+function mockSpecRevisions(): Map<string, number> {
+  globalThis.__caMockSpecRevisions ??= new Map();
+  return globalThis.__caMockSpecRevisions;
+}
+
+const mockSpecKey = (projectNumber: string, sectionKey: string) => `${projectNumber}|${sectionKey}`;
+
+function mockSpecRevision(projectNumber: string, sectionKey: string): number {
+  const published = mockSpecRevisions().get(mockSpecKey(projectNumber, sectionKey));
+  if (published !== undefined) return published;
+  return MOCK_PROJECTS.some((p) => p.projectNumber === projectNumber) || /^DC-/i.test(projectNumber) ? 1 : 0;
+}
+
+/** MOCK: a new revision of one section (0 = withdrawn). Returns the revision. */
+export function publishMockSpecRevision(
+  projectNumber: string,
+  sectionKey: string,
+  revision = mockSpecRevision(projectNumber, sectionKey) + 1,
+): number {
+  mockSpecRevisions().set(mockSpecKey(projectNumber, sectionKey), revision);
+  return revision;
+}
+
+const mockSpecRef = (projectNumber: string, sectionKey: string, revision: number) =>
+  `mock-spec-${projectNumber}-${sectionKey}-r${revision}`;
+
+export const mockSpecSource: CaSpecSource = {
+  kind: "mock",
+  async listCurrent(projectNumber) {
+    const offers: CaSourceSpecSection[] = [];
+    for (const s of MOCK_SPEC_SECTIONS) {
+      const revision = mockSpecRevision(projectNumber, s.sectionKey);
+      if (revision < 1) continue;
+      offers.push({
+        externalRef: mockSpecRef(projectNumber, s.sectionKey, revision),
+        sectionKey: s.sectionKey,
+        sectionNumber: s.sectionNumber,
+        division: s.sectionKey.slice(0, 2),
+        title: s.title,
+        revision,
+        revisionLabel: `Rev ${String(revision).padStart(2, "0")} — MOCK`,
+        isLatestApproved: true,
+        fileType: "pdf",
+        fileName: `${s.sectionNumber} ${s.title}.pdf`,
+      });
+    }
+    return offers;
+  },
+  async fetchFile(projectNumber, externalRef) {
+    const section = MOCK_SPEC_SECTIONS.find((s) => externalRef.startsWith(`mock-spec-${projectNumber}-${s.sectionKey}-r`));
+    if (!section) throw new Error(`No mock specification ${externalRef}.`);
+    return {
+      bytes: mockDrawingSetPdf(`${section.sectionNumber} ${section.title} (MOCK SPECIFICATION)`),
+      contentType: "application/pdf",
+      fileName: `${section.sectionNumber} ${section.title}.pdf`,
+    };
+  },
+};
+
+/**
+ * The project's specification sections from the CA application's Document
+ * Control (two service routes, see `ccrSpecPaths`): `listCurrent` is the
+ * current revision of every section, `fetchFile` one revision's PDF, streamed.
+ * A project the CA application does not have (404) has no sections. Other
+ * failures are logged and become `CaNotConfiguredError`.
+ */
+export const caAppSpecSource: CaSpecSource = {
+  kind: "ca-app",
+  async listCurrent(projectNumber) {
+    try {
+      const response = await ccrGet(ccrSpecPaths.latest(projectNumber), "application/json");
+      if (response.status === 404) return [];
+      if (!response.ok) throw new Error(`CA application responded ${response.status}.`);
+      return mapCcrSpecSections(await response.json());
+    } catch (error) {
+      unavailable("specification list", error, "The CA application's specifications could not be loaded.");
+    }
+  },
+  async fetchFile(projectNumber, externalRef) {
+    try {
+      const response = await ccrGet(ccrSpecPaths.file(projectNumber, externalRef), "application/pdf");
+      if (!response.ok || !response.body) throw new Error(`CA application responded ${response.status}.`);
+      return { bytes: response.body, contentType: "application/pdf", fileName: `${externalRef}.pdf` };
+    } catch (error) {
+      unavailable("specification file", error, "A specification section could not be downloaded from the CA application.");
     }
   },
 };

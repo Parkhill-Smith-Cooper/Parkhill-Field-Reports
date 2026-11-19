@@ -5,9 +5,10 @@ import { CA_HOME } from "@/lib/navigation";
 /**
  * A project's pages. `reports` is the project home (reports grouped by
  * discipline). `capture` and `route` only redirect there now: those steps
- * live inside each report (`caReportPath(..., step)`).
+ * live inside each report (`caReportPath(..., step)`). `specs` is the
+ * project's specifications, synced from the CA application, read only.
  */
-export type CaProjectTab = "capture" | "reports" | "route";
+export type CaProjectTab = "capture" | "reports" | "route" | "specs";
 
 export function caProjectPath(projectNumber: string, tab: CaProjectTab = "reports"): string {
   return `${CA_HOME}/${encodeURIComponent(projectNumber)}/${tab}`;

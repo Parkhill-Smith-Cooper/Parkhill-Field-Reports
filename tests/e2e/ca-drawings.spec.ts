@@ -97,6 +97,8 @@ async function serverSets(request: APIRequestContext, projectNumber: string) {
         source?: string;
         externalRef?: string;
         revisionLabel?: string;
+        isCurrent?: boolean;
+        indexed?: boolean;
         sheets: { page: number; sheetNumber: string; sheetName: string; naming: string }[];
       }[];
     }
@@ -175,69 +177,59 @@ test("drawing set: stored on the server, named by AI, edited, and shared across 
   await expect.poll(async () => (await serverDrawings(page.request, project)).map((d) => d.page).sort()).toEqual([2, 3]);
 });
 
-test("drawing set from the CA application: imported as a set, marked added, sheets added from it", async ({ page, context }, info) => {
-  const project = num("SETSRC", info.project.name);
+test("the CA application's drawing set syncs on its own: a new report opens on its sheets", async ({ page }, info) => {
+  // MOCK Document Control has published v1 for projects numbered DC-…
+  const project = `DC-${num("SYNC", info.project.name)}`;
   await createCaProject(page.request, project);
-  const pdf = await makeDrawingSet(context);
-  // The source offers its current set as one PDF, as the CA application's
-  // Document Control does. Intercepted in the browser only; the server's
-  // configured source stays the mock one (whose sheet id is reused here, so
-  // the server's own "imported" marking is checked below).
-  const ref = "mock-sheet-a101";
-  await page.route("**/source-drawings**", (route) => {
-    if (new URL(route.request().url()).searchParams.get("ref") === ref) {
-      return route.fulfill({ body: pdf, contentType: "application/pdf" });
-    }
-    return route.fulfill({
-      json: {
-        source: "mock",
-        drawings: [
-          {
-            externalRef: ref,
-            title: "100% CD",
-            revisionLabel: "v3 — 100% CD",
-            isLatestApproved: true,
-            fileType: "pdf",
-            fileName: "CD Set.pdf",
-            sizeBytes: pdf.length,
-            imported: false,
-          },
-        ],
-      },
-    });
-  });
-
   await startCaReport(page, project);
-  await page.getByRole("button", { name: "Add drawing" }).first().click();
-  const dialog = page.getByRole("dialog");
-  const offered = dialog.getByTestId("ca-offered-drawings");
-  await expect(offered).toContainText("Drawing set: 100% CD");
-  await expect(offered).toContainText("CD Set.pdf");
-  await expect(offered).toContainText("Latest approved (per source)");
-  await offered.getByRole("button", { name: "Import drawing set 100% CD" }).click();
 
-  // Stored like an uploaded set: every page a sheet, named from its title block.
-  await expect(sheetRows(dialog)).toHaveCount(3, { timeout: 30_000 });
-  await expect(dialog.getByTestId("ca-sheet-set")).toContainText("Drawing set from the CA application");
-  await expect(dialog.getByTestId("ca-set-revision")).toHaveText("v3 — 100% CD");
-  await expect(offered.getByRole("button", { name: "Added" })).toBeDisabled();
-  await expect(dialog.getByTestId("ca-set-sheet-label")).toHaveText(
-    ["G-001 - Cover Sheet", "A-101 - Level 1 Floor Plan", "A-102 - Level 2 Floor Plan"],
+  // No "Add drawing" needed: the report is on the CA application's current set,
+  // every sheet is listed, and the first floor plan opens.
+  await expect(page.getByTestId("ca-report-drawing-set")).toContainText("v1 — 100% CD (MOCK)", { timeout: 30_000 });
+  await expect(page.getByText("No floor plans yet")).toHaveCount(0);
+  await expect(page.getByTestId("ca-drawing-viewer")).toBeVisible({ timeout: 45_000 });
+  const select = page.getByTestId("ca-drawing-select");
+  await expect(select.locator("option")).toHaveText(
+    ["A-101 - Level 1 Floor Plan (Mock)", "A-102 - Level 2 Floor Plan (Mock)", "A-103 - Roof Plan (Mock)"],
     { timeout: 30_000 },
   );
+
+  // The server copied the PDF into the Field Reports store and listed it as current.
   const [set] = await serverSets(page.request, project);
-  expect(set).toMatchObject({ fileName: "CD Set.pdf", source: "mock", externalRef: ref, revisionLabel: "v3 — 100% CD" });
+  expect(set).toMatchObject({ source: "mock", revisionLabel: "v1 — 100% CD (MOCK)", isCurrent: true, indexed: true });
+  expect(set.id).toMatch(/^dcset_/);
+  // An opened sheet is a drawing, with an id from its set and page (the same on every device).
+  await expect
+    .poll(async () => (await serverDrawings(page.request, project)).map((d) => [d.id, d.drawingSetId]))
+    .toEqual([[`${set.id}_p1`, set.id]]);
 
-  // The server marks that version as imported for every device.
-  const listed = await page.request.get(`/api/ca/projects/${project}/source-drawings`);
-  const offers = ((await listed.json()) as { drawings: { externalRef: string; imported: boolean }[] }).drawings;
-  expect(offers.find((d) => d.externalRef === ref)?.imported).toBe(true);
+  // Another sheet opens when chosen.
+  const roof = await select.locator("option", { hasText: "A-103" }).getAttribute("value");
+  await select.selectOption(roof!);
+  await expect(page.getByTestId("ca-drawing-viewer")).toBeVisible({ timeout: 45_000 });
+  await expect.poll(async () => (await serverDrawings(page.request, project)).length).toBe(2);
 
-  // A sheet of the imported set becomes a drawing, linked to the set.
-  await sheetRows(dialog).nth(1).getByRole("button", { name: "Add" }).click();
-  await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 30_000 });
-  await expect(page.getByText("PDF page 2 of 3")).toBeVisible();
-  expect(await serverDrawings(page.request, project)).toMatchObject([{ page: 2, drawingSetId: set.id }]);
+  // Pins work as on any drawing.
+  await (await dropPinAt(page, 0.4, 0.4)).getByRole("button", { name: "Done" }).click();
+  await expect.poll(async () => (await serverPins(page.request, project)).length).toBe(1);
+
+  // The dialog shows the set as synced; nothing to import.
+  await page.getByRole("button", { name: "Add drawing" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByTestId("ca-offered-set-status")).toHaveText("Synced");
+  await expect(dialog.getByTestId("ca-check-drawing-updates")).toBeVisible();
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  // The printed report says which drawing set it was made with.
+  await openReportStep(page, "Report");
+  await expect(page.getByTestId("ca-report-drawing-set-label")).toHaveText("v1 — 100% CD (MOCK)");
+
+  // The push from the CA application is refused without its own credentials
+  // (not configured here at all).
+  const push = await page.request.post("/api/ca/integrations/ccr/drawing-sets", {
+    data: { projectNumber: project, event: "published" },
+  });
+  expect(push.status()).toBe(503);
 
   // An origin from a source that is not configured is refused.
   const refused = await page.request.put(`/api/ca/projects/${project}/drawing-sets/caset_e2e_wrong_source`, {

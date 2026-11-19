@@ -14,8 +14,32 @@ export type DrawingSetOrigin = Required<Pick<CaDrawingSet, "source" | "externalR
 const base = (projectNumber: string) => `/api/ca/projects/${encodeURIComponent(projectNumber)}/drawing-sets`;
 const one = (projectNumber: string, setId: string) => `${base(projectNumber)}/${encodeURIComponent(setId)}`;
 
-export async function fetchDrawingSets(projectNumber: string): Promise<CaDrawingSetWithUrl[]> {
-  return (await apiGet<{ sets: CaDrawingSetWithUrl[] }>(base(projectNumber))).sets;
+/**
+ * The project's sets. `syncing` is true while the server is still copying
+ * the CA application's current set; ask again shortly.
+ */
+export async function fetchDrawingSets(
+  projectNumber: string,
+): Promise<{ sets: CaDrawingSetWithUrl[]; syncing: boolean }> {
+  const { sets, syncing } = await apiGet<{ sets: CaDrawingSetWithUrl[]; syncing?: boolean }>(base(projectNumber));
+  return { sets, syncing: syncing === true };
+}
+
+/** "Check for updates": the server asks the CA application for the current set now. */
+export async function checkDrawingSetUpdates(projectNumber: string): Promise<void> {
+  await apiPost(`${base(projectNumber)}/sync`, {});
+}
+
+/**
+ * A synced set's pages as sheets, from the first device to open it. Throws
+ * an `ApiRequestError` with status 409 when another device got there first.
+ */
+export async function indexDrawingSet(
+  projectNumber: string,
+  setId: string,
+  index: { pageCount: number; sheets: SetSheet[] },
+): Promise<CaDrawingSetWithUrl> {
+  return (await apiPut<{ set: CaDrawingSetWithUrl }>(`${one(projectNumber, setId)}/index`, index)).set;
 }
 
 /** A block that fails on a flaky connection is retried twice before giving up. */

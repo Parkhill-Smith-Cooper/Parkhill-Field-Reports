@@ -2,7 +2,7 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 
-import type { CaDiscipline, CaDrawing, CaPin, CaProject, CaReportContent } from "@/types/ca";
+import type { CaDiscipline, CaDrawing, CaDrawingSet, CaPin, CaProject, CaReportContent, CaSpecSection } from "@/types/ca";
 
 /**
  * The on-device store for CA Field Reports (IndexedDB).
@@ -18,6 +18,9 @@ import type { CaDiscipline, CaDrawing, CaPin, CaProject, CaReportContent } from 
  * - `pins`      floor-plan pins, queued for sync like photos.
  * - `drawings`  drawing records and sheet images, cached for offline viewing.
  * - `drafts`    report drafts, queued for sync like photos and pins.
+ * - `drawingSetIndex` the project's drawing sets (records only, no PDF),
+ *               so reports start on the current set and list its sheets
+ *               with no signal. A read cache, never queued.
  * - `outbox`    one entry per record waiting to sync. Keyed by
  *               `{kind}:{entityId}`, so re-queuing the same record replaces
  *               its entry instead of adding a second one - a record can be
@@ -68,6 +71,27 @@ export type CachedDrawing = {
   cachedAt: string;
 };
 
+/** A drawing-set record (sheets and sync fields), cached for offline use. */
+export type CachedDrawingSet = {
+  id: string;
+  projectNumber: string;
+  set: CaDrawingSet;
+  cachedAt: string;
+};
+
+/**
+ * A specification section revision, plus its PDF once someone has opened it
+ * on this device, so it reopens with no signal. A read cache, never queued.
+ */
+export type CachedSpecSection = {
+  id: string;
+  projectNumber: string;
+  section: CaSpecSection;
+  /** Null until the section has been opened (and so downloaded) here. */
+  blob: Blob | null;
+  cachedAt: string;
+};
+
 /** A report's working draft as edited on this device. */
 export type LocalDraft = {
   /** The report id (generated on the device when the report was started). */
@@ -105,6 +129,8 @@ interface CaDbSchema extends DBSchema {
   pins: { key: string; value: LocalPin; indexes: { byProject: string } };
   drawings: { key: string; value: CachedDrawing; indexes: { byProject: string } };
   drafts: { key: string; value: LocalDraft; indexes: { byProject: string } };
+  drawingSetIndex: { key: string; value: CachedDrawingSet; indexes: { byProject: string } };
+  specSections: { key: string; value: CachedSpecSection; indexes: { byProject: string } };
   outbox: { key: string; value: OutboxEntry };
 }
 
@@ -118,8 +144,10 @@ const DB_NAME = "parkhill-ca-field-reports";
  * - 2: briefly (development builds only) added a device-only `sheetSets` store
  *      for drawing sets, which now live on the server.
  * - 3: removes `sheetSets` where a version-2 database created it.
+ * - 4: adds `drawingSetIndex` (synced drawing sets, records only).
+ * - 5: adds `specSections` (specification sections, and the PDFs opened here).
  */
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 const RETIRED_STORES = ["sheetSets"];
 
 let dbPromise: Promise<CaDb> | null = null;
@@ -134,6 +162,12 @@ export function openCaDb(): Promise<CaDb> {
           store.createIndex("byProject", "projectNumber");
         }
         db.createObjectStore("outbox", { keyPath: "key" });
+      }
+      if (oldVersion < 4) {
+        db.createObjectStore("drawingSetIndex", { keyPath: "id" }).createIndex("byProject", "projectNumber");
+      }
+      if (oldVersion < 5) {
+        db.createObjectStore("specSections", { keyPath: "id" }).createIndex("byProject", "projectNumber");
       }
       // Untyped: retired stores are no longer part of the schema.
       const raw = db as unknown as IDBDatabase;

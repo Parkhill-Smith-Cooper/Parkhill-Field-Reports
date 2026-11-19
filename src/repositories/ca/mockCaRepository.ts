@@ -18,7 +18,9 @@ import type {
   CaProject,
   CaReport,
   CaReportRevision,
+  CaSpecSection,
 } from "@/types/ca";
+import { bySectionRevision } from "@/lib/ca/specSections";
 
 /**
  * MOCK CA repository — development and tests only.
@@ -39,6 +41,7 @@ type Db = {
   pins: Record<string, Record<string, CaPin>>;
   drawings: Record<string, Record<string, CaDrawing>>;
   drawingSets: Record<string, Record<string, CaDrawingSet>>;
+  specSections: Record<string, Record<string, CaSpecSection>>;
   reports: Record<string, Record<string, CaReport>>;
   revisions: Record<string, Record<string, CaReportRevision>>;
 };
@@ -50,6 +53,7 @@ function emptyDb(): Db {
     pins: {},
     drawings: {},
     drawingSets: {},
+    specSections: {},
     reports: {},
     revisions: {},
   };
@@ -146,6 +150,7 @@ export function createMockCaRepository(options: {
         delete db.pins[projectNumber];
         delete db.drawings[projectNumber];
         delete db.drawingSets[projectNumber];
+        delete db.specSections[projectNumber];
         delete db.reports[projectNumber];
         delete db.revisions[projectNumber];
         persist();
@@ -246,6 +251,16 @@ export function createMockCaRepository(options: {
         persist();
         return clone(existing);
       },
+      async update(projectNumber, setId, change) {
+        const table = db.drawingSets[projectNumber];
+        const existing = table?.[setId];
+        if (!existing) return null;
+        const next = change(clone(existing));
+        if (!next) return clone(existing);
+        table[setId] = clone({ ...next, id: existing.id, projectNumber: existing.projectNumber });
+        persist();
+        return clone(table[setId]);
+      },
       async remove(projectNumber, setId, removedBy) {
         const existing = db.drawingSets[projectNumber]?.[setId];
         if (!existing) return null;
@@ -254,6 +269,35 @@ export function createMockCaRepository(options: {
           persist();
         }
         return clone(existing);
+      },
+    },
+
+    specSections: {
+      async list(projectNumber) {
+        return Object.values(db.specSections[projectNumber] ?? {})
+          .sort(bySectionRevision)
+          .map(clone);
+      },
+      async get(projectNumber, sectionId) {
+        const section = db.specSections[projectNumber]?.[sectionId];
+        return section ? clone(section) : null;
+      },
+      async create(section) {
+        const table = bucket(db.specSections, section.projectNumber);
+        if (table[section.id]) return clone(table[section.id]);
+        table[section.id] = clone(section);
+        persist();
+        return clone(section);
+      },
+      async update(projectNumber, sectionId, change) {
+        const table = db.specSections[projectNumber];
+        const existing = table?.[sectionId];
+        if (!existing) return null;
+        const next = change(clone(existing));
+        if (!next) return clone(existing);
+        table[sectionId] = clone({ ...next, id: existing.id, projectNumber: existing.projectNumber });
+        persist();
+        return clone(table[sectionId]);
       },
     },
 

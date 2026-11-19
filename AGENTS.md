@@ -24,7 +24,9 @@ reference; this is the short list of things that are easy to get wrong.
   - `AppHeader` (also mounts `CaNavSearch`, which renders nothing on CX
     pages) and `FieldReportsMenu` (switcher; no section badge), `relayState` (landing), the projects-page eyebrow,
     the root description;
-  - `proxy.ts` (matcher excludes `sw.js`, the manifest and the icon);
+  - `proxy.ts` (matcher excludes `sw.js`, the manifest and the icon;
+    `/api/ca/integrations/ccr/drawing-sets` is public and checks ccr's
+    app-only token itself);
   - `apiClient.ts` (`apiPutForm`, `apiGetBlob`);
   - `lib/azure/cosmos.ts` (`databaseContainer`).
 - **Never commit `.env*`**, and never print secrets. New settings get blank
@@ -38,6 +40,10 @@ reference; this is the short list of things that are easy to get wrong.
   (VantagePoint is the fallback) and Document Control's two `/service/`
   routes. ccr says which set is current; never infer it. Record questions in
   `docs/ca-integration-contracts.md`.
+- **Drawing sets sync from ccr on the server** (`src/lib/ca/drawingSync.ts`):
+  ccr says which set is current; nothing infers it, and nothing synced is
+  ever deleted. A report records its set (`content.drawingSet`) and keeps it.
+  Synced ids are derived (`src/lib/ca/syncedSets.ts`), never random.
 - **Start Tracking is a placeholder.** Don't add location tracking without a
   decision. See `docs/ca-positioning-research.md`.
 

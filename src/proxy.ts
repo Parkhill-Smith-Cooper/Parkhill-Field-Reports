@@ -24,6 +24,11 @@ const PUBLIC_PATHS = new Set([
   "/api/saml/acs",
   "/api/saml/logout",
   "/api/saml/metadata",
+  // The CA application's drawing-set push: no session, its own app-only
+  // Entra token check (src/lib/ca/serviceAuth.ts).
+  "/api/ca/integrations/ccr/drawing-sets",
+  // Its specifications push, under the same token check.
+  "/api/ca/integrations/ccr/specifications",
 ]);
 
 export async function proxy(request: NextRequest) {

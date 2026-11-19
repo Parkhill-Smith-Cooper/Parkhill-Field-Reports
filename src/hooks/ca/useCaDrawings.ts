@@ -92,5 +92,20 @@ export function useCaDrawings(projectNumber: string) {
     await readCache();
   }
 
-  return { drawings: views, loaded, serverReachable, refresh, added };
+  /** Downloads a drawing's sheet image and keeps it on this device (needs a connection). */
+  const keepOffline = useCallback(
+    async (drawingId: string) => {
+      const drawing = views.find((d) => d.id === drawingId);
+      const url = serverUrls.current.get(drawingId);
+      if (!drawing || !url) throw new Error("Saving this sheet for offline use needs a connection.");
+      const record: CaDrawing & Partial<Pick<CaDrawingView, "src" | "offlineReady">> = { ...drawing };
+      delete record.src;
+      delete record.offlineReady;
+      await cacheDrawing(record, await downloadDrawingSheet(url));
+      await readCache();
+    },
+    [views, readCache],
+  );
+
+  return { drawings: views, loaded, serverReachable, refresh, added, keepOffline };
 }

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { openPdf, type OpenedPdf, type PreparedSheet } from "@/lib/ca/drawingSheet";
 import { newCaSheetSetId } from "@/lib/ca/ids";
+import { listCachedDrawingSets, mirrorDrawingSets } from "@/lib/ca/offline/drawingSetCache";
+import { isSyncedSet } from "@/lib/ca/syncedSets";
 import {
   initialSheets,
   MAX_PAGES_PER_REQUEST,
@@ -12,8 +14,10 @@ import {
 } from "@/lib/ca/sheetIndex";
 import { ApiRequestError } from "@/services/apiClient";
 import {
+  checkDrawingSetUpdates,
   editSetSheet,
   fetchDrawingSets,
+  indexDrawingSet,
   nameSetSheets,
   removeDrawingSet,
   uploadDrawingSet,
@@ -35,6 +39,27 @@ const MIN_TITLE_BLOCK_TEXT = 12;
 const CONCURRENT_REQUESTS = 2;
 /** Read URLs last 15 minutes in Azure; open a set's PDF only with a fresher one. */
 const URL_MAX_AGE_MS = 10 * 60 * 1000;
+/** While the server is copying a set from the CA application, ask again this often. */
+const SYNC_POLL_MS = 4000;
+
+export type IndexingStatus = { done: number; total: number } | { failed: string };
+
+/**
+ * Sets being indexed on this device, shared by every hook instance (Capture
+ * and the Add drawing dialog may both be mounted), so a set is read once.
+ */
+const indexingNow = new Map<string, Promise<void>>();
+
+/** Every page's title-block text, read on this device. */
+async function readTitleBlocks(doc: OpenedPdf, onPage?: (done: number, total: number) => void) {
+  const lines = new Map<number, string[]>();
+  for (let page = 1; page <= doc.pageCount; page++) {
+    const text = await doc.text(page);
+    lines.set(page, titleBlockLines(text.items, text.width, text.height));
+    onPage?.(page, doc.pageCount);
+  }
+  return lines;
+}
 
 /**
  * The project's drawing sets, stored on the server (the PDF in the CA file
@@ -51,31 +76,62 @@ export function useCaDrawingSets(projectNumber: string) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [naming, setNaming] = useState<Record<string, SheetNamingStatus>>({});
+  /** The server is copying the CA application's current set. */
+  const [syncing, setSyncing] = useState(false);
+  const [indexing, setIndexing] = useState<Record<string, IndexingStatus>>({});
   const docs = useRef(new Map<string, Promise<OpenedPdf>>());
   const fetchedAt = useRef(0);
   const latest = useRef<CaDrawingSetWithUrl[]>([]);
+  const mounted = useRef(true);
 
   const store = useCallback((list: CaDrawingSetWithUrl[]) => {
     latest.current = list;
     setSets(list);
   }, []);
 
+  /**
+   * A change the server accepted (indexing, naming, an edit, an upload):
+   * shown, and kept on the device too, so the sheets are there offline
+   * without waiting for the next listing.
+   */
+  const storeAccepted = useCallback(
+    (list: CaDrawingSetWithUrl[]) => {
+      store(list);
+      void mirrorDrawingSets(projectNumber, list).catch(() => undefined);
+    },
+    [projectNumber, store],
+  );
+
   const replaceSet = useCallback(
-    (next: CaDrawingSetWithUrl) => store(latest.current.map((s) => (s.id === next.id ? next : s))),
-    [store],
+    (next: CaDrawingSetWithUrl) => storeAccepted(latest.current.map((s) => (s.id === next.id ? next : s))),
+    [storeAccepted],
+  );
+
+  /** Forgets indexing failures, so those sets are tried again. */
+  const clearIndexingFailures = useCallback(
+    () =>
+      setIndexing((prev) =>
+        Object.values(prev).some((status) => "failed" in status)
+          ? Object.fromEntries(Object.entries(prev).filter(([, status]) => !("failed" in status)))
+          : prev,
+      ),
+    [],
   );
 
   const refresh = useCallback(
-    () =>
+    (): Promise<void> =>
       fetchDrawingSets(projectNumber).then(
-        (list) => {
+        ({ sets: list, syncing: busy }) => {
           fetchedAt.current = Date.now();
           store(list);
+          setSyncing(busy);
           setLoadError(null);
           setLoaded(true);
+          void mirrorDrawingSets(projectNumber, list).catch(() => undefined);
         },
         (error: unknown) => {
           setLoadError(error instanceof Error ? error.message : "The drawing sets could not be loaded.");
+          setSyncing(false);
           setLoaded(true);
         },
       ),
@@ -83,8 +139,27 @@ export function useCaDrawingSets(projectNumber: string) {
   );
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    mounted.current = true;
+    // The device copy first (instant, and all there is with no signal), then the server.
+    void listCachedDrawingSets(projectNumber)
+      .then(
+        (cached) => {
+          if (fetchedAt.current === 0 && cached.length > 0) store(cached.map((set) => ({ ...set, url: "" })));
+        },
+        () => undefined,
+      )
+      .then(refresh);
+    return () => {
+      mounted.current = false;
+    };
+  }, [projectNumber, refresh, store]);
+
+  // While the server copies a set, ask again shortly (each answer re-arms this).
+  useEffect(() => {
+    if (!syncing) return;
+    const timer = setTimeout(() => void refresh(), SYNC_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [syncing, sets, refresh]);
 
   useEffect(() => {
     const open = docs.current;
@@ -103,6 +178,7 @@ export function useCaDrawingSets(projectNumber: string) {
           if (Date.now() - fetchedAt.current > URL_MAX_AGE_MS) await refresh();
           const set = latest.current.find((s) => s.id === setId);
           if (!set) throw new Error("That drawing set is no longer available.");
+          if (!set.url) throw new Error("Opening the drawing set needs a connection.");
           return openPdf(set.url);
         })();
         docs.current.set(setId, doc);
@@ -184,12 +260,7 @@ export function useCaDrawingSets(projectNumber: string) {
   ): Promise<CaDrawingSetWithUrl> {
     const doc = await openPdf(file);
     try {
-      const lines = new Map<number, string[]>();
-      for (let page = 1; page <= doc.pageCount; page++) {
-        const text = await doc.text(page);
-        lines.set(page, titleBlockLines(text.items, text.width, text.height));
-        onProgress?.({ phase: "reading", done: page, total: doc.pageCount });
-      }
+      const lines = await readTitleBlocks(doc, (done, total) => onProgress?.({ phase: "reading", done, total }));
       const set = await uploadDrawingSet(
         projectNumber,
         newCaSheetSetId(),
@@ -203,13 +274,86 @@ export function useCaDrawingSets(projectNumber: string) {
       );
       // This device already has the PDF open: no need to download it back.
       docs.current.set(set.id, Promise.resolve(doc));
-      store([...latest.current.filter((s) => s.id !== set.id), set]);
+      storeAccepted([...latest.current.filter((s) => s.id !== set.id), set]);
       void nameSheets(set, lines);
       return set;
     } catch (error) {
       await doc.close();
       throw error;
     }
+  }
+
+  /**
+   * Lists a synced set's pages as sheets. The server copies the PDF from
+   * the CA application without reading it, so the first device to open the
+   * set reads its title blocks (as for an upload) and saves the sheets for
+   * everyone; AI naming follows. Another device getting there first is fine.
+   */
+  const indexSet = useCallback(
+    (set: CaDrawingSetWithUrl): Promise<void> => {
+      const running = indexingNow.get(set.id);
+      if (running) return running;
+      const status = (next: IndexingStatus | null) => {
+        if (!mounted.current) return;
+        setIndexing((prev) => {
+          const copy = { ...prev };
+          if (next) copy[set.id] = next;
+          else delete copy[set.id];
+          return copy;
+        });
+      };
+      const run = (async () => {
+        try {
+          const doc = await openSet(set.id);
+          const lines = await readTitleBlocks(doc, (done, total) => status({ done, total }));
+          let indexed: CaDrawingSetWithUrl;
+          try {
+            indexed = await indexDrawingSet(projectNumber, set.id, {
+              pageCount: doc.pageCount,
+              sheets: initialSheets([...lines].map(([page, l]) => ({ page, lines: l }))),
+            });
+          } catch (error) {
+            if (error instanceof ApiRequestError && error.status === 409) {
+              await refresh();
+              status(null);
+              return;
+            }
+            throw error;
+          }
+          replaceSet(indexed);
+          status(null);
+          void nameSheets(indexed, lines);
+        } catch (error) {
+          status({ failed: error instanceof Error ? error.message : "The drawing set could not be read." });
+        }
+      })().finally(() => indexingNow.delete(set.id));
+      indexingNow.set(set.id, run);
+      return run;
+    },
+    [nameSheets, openSet, projectNumber, refresh, replaceSet],
+  );
+
+  // A synced set not yet listed as sheets: list it (needs a connection).
+  useEffect(() => {
+    for (const set of sets) {
+      if (isSyncedSet(set) && set.indexed === false && !set.removed && set.url && !indexing[set.id]) {
+        void indexSet(set);
+      }
+    }
+  }, [sets, indexing, indexSet]);
+
+  // Back online: sets that failed to index (no connection, say) are tried again.
+  useEffect(() => {
+    window.addEventListener("online", clearIndexingFailures);
+    return () => window.removeEventListener("online", clearIndexingFailures);
+  }, [clearIndexingFailures]);
+
+  /** "Check for updates": asks the server to look at the CA application now. */
+  async function checkForUpdates() {
+    clearIndexingFailures();
+    await checkDrawingSetUpdates(projectNumber);
+    setSyncing(true);
+    await refresh();
   }
 
   /** The engineer's correction. Marked edited, so AI never overwrites it. */
@@ -222,7 +366,7 @@ export function useCaDrawingSets(projectNumber: string) {
     const doc = docs.current.get(setId);
     docs.current.delete(setId);
     void doc?.then((d) => d.close(), () => undefined);
-    store(latest.current.filter((s) => s.id !== setId));
+    storeAccepted(latest.current.filter((s) => s.id !== setId));
     setNaming((prev) => {
       const copy = { ...prev };
       delete copy[setId];
@@ -245,7 +389,11 @@ export function useCaDrawingSets(projectNumber: string) {
     loaded,
     loadError,
     naming,
+    syncing,
+    indexing,
     refresh,
+    checkForUpdates,
+    indexSet,
     upload,
     nameSheets: (set: CaDrawingSetWithUrl) => nameSheets(set),
     editSheet,

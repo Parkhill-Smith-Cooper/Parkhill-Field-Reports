@@ -6,10 +6,13 @@ import {
   type CaFileStore,
   type CaProjectSource,
   type CaRepository,
+  type CaSpecSource,
 } from "@/lib/ca/contracts";
 import { databaseContainer } from "@/lib/azure/cosmos";
 import { createBlobFileStore } from "@/lib/ca/files/blobFileStore";
 import { createMockFileStore } from "@/lib/ca/files/mockFileStore";
+import type { DrawingSyncDeps } from "@/lib/ca/drawingSync";
+import type { SpecSyncDeps } from "@/lib/ca/specSync";
 import { env } from "@/lib/env";
 
 import { createCosmosCaRepository, type CosmosContainerLike } from "./cosmosCaRepository";
@@ -17,8 +20,10 @@ import { createMockCaRepository } from "./mockCaRepository";
 import {
   caAppDrawingSource,
   caAppProjectSource,
+  caAppSpecSource,
   mockDrawingSource,
   mockProjectSource,
+  mockSpecSource,
   vantagePointProjectSource,
 } from "./sources";
 
@@ -113,6 +118,21 @@ export function getCaDrawingSource(): CaDrawingSource | null {
   }
 }
 
+/**
+ * Specifications come from the same Document Control as drawings, so they
+ * follow `CA_DRAWING_SOURCE`. `null` when there is none.
+ */
+export function getCaSpecSource(): CaSpecSource | null {
+  switch (caConfig.drawingSource) {
+    case "mock":
+      return mockSpecSource;
+    case "ca-app":
+      return caAppSpecSource;
+    case "none":
+      return null;
+  }
+}
+
 /** What the UI needs to know about the current wiring (no secrets). */
 export function caRuntimeInfo() {
   return {
@@ -121,4 +141,14 @@ export function caRuntimeInfo() {
     projectFallbackSource: caConfig.projectFallbackSource,
     drawingSource: caConfig.drawingSource,
   };
+}
+
+/** What the drawing sync (`src/lib/ca/drawingSync.ts`) works with. */
+export function caDrawingSyncDeps(): DrawingSyncDeps {
+  return { repo: getCaRepository(), files: getCaFileStore(), source: getCaDrawingSource() };
+}
+
+/** What the specification sync (`src/lib/ca/specSync.ts`) works with. */
+export function caSpecSyncDeps(): SpecSyncDeps {
+  return { repo: getCaRepository(), files: getCaFileStore(), source: getCaSpecSource() };
 }

@@ -5,10 +5,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { newCaReportId } from "@/lib/ca/ids";
 import type { LocalDraft, SyncState } from "@/lib/ca/offline/db";
 import { getLocalDraft, listLocalDrafts, saveLocalDraft } from "@/lib/ca/offline/draftStore";
+import { cachedCurrentDrawingSet, mirrorDrawingSets } from "@/lib/ca/offline/drawingSetCache";
 import { onCaLocalChange } from "@/lib/ca/offline/events";
 import { reportState } from "@/lib/ca/reportContent";
+import { currentSyncedSet, reportDrawingSet } from "@/lib/ca/syncedSets";
+import { fetchDrawingSets } from "@/services/ca/drawingSetService";
 import { fetchCaReport, fetchCaReports } from "@/services/ca/reportService";
-import type { CaDiscipline, CaReport, CaReportContent, CaReportState, CaRevisionSummary } from "@/types/ca";
+import type {
+  CaDiscipline,
+  CaDrawingSet,
+  CaReport,
+  CaReportContent,
+  CaReportState,
+  CaRevisionSummary,
+} from "@/types/ca";
 
 export type CaReportListItem = {
   id: string;
@@ -32,9 +42,42 @@ function preferLocal(local: LocalDraft | undefined, server: CaReport | undefined
   return local.syncState !== "synced" || local.clientUpdatedAt >= server.draftUpdatedAt;
 }
 
+/** How long starting a report waits for the server's word on the current drawing set. */
+const CURRENT_SET_WAIT_MS = 3000;
+
+/**
+ * The project's current drawing set from the CA application: the server's
+ * answer when it comes quickly (it is kept in step with the CA application),
+ * else what this device last heard. Null when there is none.
+ */
+async function currentDrawingSetFor(projectNumber: string): Promise<CaDrawingSet | null> {
+  if (typeof navigator !== "undefined" && navigator.onLine) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const fresh = await Promise.race([
+        fetchDrawingSets(projectNumber).then(async ({ sets }) => {
+          await mirrorDrawingSets(projectNumber, sets).catch(() => undefined);
+          return { sets };
+        }),
+        new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), CURRENT_SET_WAIT_MS))),
+      ]);
+      if (fresh) return currentSyncedSet(fresh.sets);
+    } catch {
+      // Fall back to the device copy.
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return cachedCurrentDrawingSet(projectNumber);
+}
+
 /**
  * Starts a report on this device (works offline) and returns its id. The draft
  * is saved and queued at once, so it survives the engineer leaving the page.
+ *
+ * The report records the project's current drawing set from the CA
+ * application, so it is made with the latest drawings and keeps them after a
+ * newer set arrives.
  */
 export async function startCaReport(
   projectNumber: string,
@@ -42,7 +85,9 @@ export async function startCaReport(
   meta: { discipline?: CaDiscipline; createdByName?: string } = {},
 ): Promise<string> {
   const id = newCaReportId();
-  await saveLocalDraft({ id, projectNumber, content, createdAt: new Date().toISOString(), ...meta });
+  const set = content.drawingSet ? null : await currentDrawingSetFor(projectNumber);
+  const withSet = set ? { ...content, drawingSet: reportDrawingSet(set) } : content;
+  await saveLocalDraft({ id, projectNumber, content: withSet, createdAt: new Date().toISOString(), ...meta });
   return id;
 }
 
@@ -203,6 +248,8 @@ export function useCaReport(projectNumber: string, reportId: string) {
     revisions: server?.revisions ?? [],
     syncState: local?.syncState ?? (server ? "synced" : "pending"),
     serverReachable: serverState !== "offline",
+    /** "ok": `report` is the server's; "missing": never reached the server; else not known yet. */
+    serverState,
     save,
     refresh: readServer,
   };

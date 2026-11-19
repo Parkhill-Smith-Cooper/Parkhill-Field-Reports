@@ -9,7 +9,17 @@ import { numberPins, pinName } from "./pins";
 
 type LocPhoto = { id: string; caption: string; pinId?: string; deleted?: boolean };
 type LocPin = { id: string; drawingId: string; createdAt: string; label: string; x: number; y: number; deleted?: boolean };
-type LocDrawing = { id: string; title: string; sheetNumber?: string; filePath: string; width: number; height: number };
+type LocDrawing = {
+  id: string;
+  title: string;
+  sheetNumber?: string;
+  filePath: string;
+  width: number;
+  height: number;
+  /** A sheet of a drawing set: the set's version label, shown with the sheet. */
+  drawingSetId?: string;
+  revisionLabel?: string;
+};
 
 /**
  * One section per pin that the report's observation-item photos were taken
@@ -50,7 +60,11 @@ export function buildReportLocations(input: {
     return {
       pinId,
       title: pinName(pin, numbers.get(pinId)),
-      subtitle: drawing ? [drawing.sheetNumber, drawing.title].filter(Boolean).join(" · ") : "",
+      subtitle: drawing
+        ? [drawing.sheetNumber, drawing.title, drawing.drawingSetId ? drawing.revisionLabel : undefined]
+            .filter(Boolean)
+            .join(" · ")
+        : "",
       drawing: drawing
         ? { id: drawing.id, filePath: drawing.filePath, width: drawing.width, height: drawing.height }
         : null,

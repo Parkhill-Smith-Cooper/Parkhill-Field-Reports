@@ -534,7 +534,9 @@ Three conventions worth preserving:
 - **Access control lives only in `src/proxy.ts`.** Routes are protected unless
   explicitly listed as public there. That is the only arrangement that stays
   correct when someone adds a route later and forgets to think about auth — so
-  resist adding per-page checks alongside it.
+  resist adding per-page checks alongside it. The one public API path,
+  `/api/ca/integrations/ccr/drawing-sets`, is a service-to-service call from
+  the CA application and verifies its own Entra app-only token.
 
 - **Components never call `fetch`.** Every network call goes through
   `src/services`, so error handling is uniform and the API surface is visible

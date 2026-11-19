@@ -133,7 +133,8 @@ export function validateDrawingMeta(body: unknown): string | null {
     return "An imported drawing needs its source reference.";
   }
   if (body.drawingSetId !== undefined) {
-    if (body.source !== "upload" || body.fileType !== "pdf" || !isValidGeneratedId(body.drawingSetId)) {
+    // A sheet of a set uploaded by hand ("upload") or synced from the source.
+    if (body.fileType !== "pdf" || !isValidGeneratedId(body.drawingSetId)) {
       return "Invalid drawing set.";
     }
   }
@@ -155,8 +156,47 @@ export function validateDrawingSetCommit(body: unknown): string | null {
   if (!(Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= MAX_SET_PAGES)) {
     return `Drawing sets can have up to ${MAX_SET_PAGES} pages.`;
   }
-  if (!Array.isArray(body.sheets) || body.sheets.length !== pages) return "Include one sheet per page.";
-  for (const [i, sheet] of body.sheets.entries()) {
+  const sheetProblem = validateSheets(body.sheets, pages as number);
+  if (sheetProblem) return sheetProblem;
+  // Optional: where an imported set came from. All or nothing.
+  if (body.source !== undefined || body.externalRef !== undefined || body.revisionLabel !== undefined) {
+    if (body.source !== "mock" && body.source !== "ca-app") return "Invalid drawing source.";
+    if (!isStr(body.externalRef, 300) || body.externalRef.trim().length === 0) return "Invalid drawing reference.";
+    if (body.revisionLabel !== undefined && !isStr(body.revisionLabel, 120)) return "Invalid revision label.";
+  }
+  return null;
+}
+
+/**
+ * Body of the CA application's push, `POST /api/ca/integrations/ccr/drawing-sets`.
+ * Only ids: the file is then fetched from the CA application's read route.
+ */
+export function validateDrawingSyncPush(body: unknown): string | null {
+  if (!isObj(body)) return "Request body must be an object.";
+  if (!isValidProjectNumber(body.projectNumber)) return "Invalid project number.";
+  if (body.versionId !== undefined && (!isStr(body.versionId, MAX_SHORT) || body.versionId.trim().length === 0)) {
+    return "Invalid version id.";
+  }
+  if (!["published", "updated", "removed"].includes(body.event as string)) return "Invalid event.";
+  return null;
+}
+
+/**
+ * Body of `PUT .../drawing-sets/{setId}/index`: a synced set's pages, listed
+ * as sheets by the first device to open it.
+ */
+export function validateDrawingSetIndex(body: unknown): string | null {
+  if (!isObj(body)) return "Request body must be an object.";
+  const pages = body.pageCount;
+  if (!(Number.isInteger(pages) && (pages as number) > 0 && (pages as number) <= MAX_SET_PAGES)) {
+    return `Drawing sets can have up to ${MAX_SET_PAGES} pages.`;
+  }
+  return validateSheets(body.sheets, pages as number);
+}
+
+function validateSheets(sheets: unknown, pages: number): string | null {
+  if (!Array.isArray(sheets) || sheets.length !== pages) return "Include one sheet per page.";
+  for (const [i, sheet] of sheets.entries()) {
     if (
       !isObj(sheet) ||
       sheet.page !== i + 1 ||
@@ -166,12 +206,6 @@ export function validateDrawingSetCommit(body: unknown): string | null {
     ) {
       return "Invalid sheet.";
     }
-  }
-  // Optional: where an imported set came from. All or nothing.
-  if (body.source !== undefined || body.externalRef !== undefined || body.revisionLabel !== undefined) {
-    if (body.source !== "mock" && body.source !== "ca-app") return "Invalid drawing source.";
-    if (!isStr(body.externalRef, 300) || body.externalRef.trim().length === 0) return "Invalid drawing reference.";
-    if (body.revisionLabel !== undefined && !isStr(body.revisionLabel, 120)) return "Invalid revision label.";
   }
   return null;
 }
@@ -282,6 +316,18 @@ export function validateReportContent(value: unknown): string | null {
       if (!isValidGeneratedId(pinId) || typeof level !== "number" || !(level >= MIN_ZOOM && level <= MAX_ZOOM)) {
         return "Invalid floor plan zoom.";
       }
+    }
+  }
+
+  if (c.drawingSet !== undefined) {
+    const set = c.drawingSet;
+    if (
+      !isObj(set) ||
+      !isValidGeneratedId(set.setId) ||
+      (set.revisionLabel !== undefined && !isStr(set.revisionLabel, 120)) ||
+      (set.title !== undefined && !isStr(set.title, MAX_SHORT))
+    ) {
+      return "Invalid drawing set.";
     }
   }
   return null;

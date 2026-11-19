@@ -122,9 +122,76 @@ export type CaDrawingSet = {
   source?: "mock" | "ca-app";
   externalRef?: string;
   revisionLabel?: string;
+  /** The set's label in the source ("100% CD"). Synced sets only. */
+  title?: string;
+  /**
+   * Synced sets only: true while the source says this is the project's
+   * current set. Never inferred; set from the source's `/latest`.
+   */
+  isCurrent?: boolean;
+  /**
+   * False for a set synced on the server and not yet read on a device
+   * (`pageCount` 0, no sheets). The first device to open it lists its
+   * sheets. Absent means indexed.
+   */
+  indexed?: boolean;
+  /** When the server last confirmed this set against the source. */
+  syncedAt?: string;
   removed?: boolean;
   removedAt?: string;
   removedBy?: string;
+};
+
+/**
+ * One revision of a project specification section, synced from the CA
+ * application's Document Control (Specifications). Read-only reference: no
+ * sheets, no pins. Every revision ever synced is kept; `isCurrent` marks the
+ * one the CA application says is current for its section.
+ */
+export type CaSpecSection = {
+  /** Derived from `externalRef` (`syncedSpecSectionId`), so every sync converges on one record. */
+  id: string;
+  projectNumber: string;
+  /** Digits of the CSI number, e.g. "033000" or "033500.13". Groups revisions of one section. */
+  sectionKey: string;
+  /** Display form, e.g. "03 30 00". */
+  sectionNumber: string;
+  /** MasterFormat division, e.g. "03". */
+  division: string;
+  title: string;
+  revision: number;
+  /** As labelled by the source, e.g. "Rev 02 — Addendum 2". */
+  revisionLabel?: string;
+  fileName: string;
+  /** Path of the PDF within the CA file store. */
+  filePath: string;
+  sizeBytes: number;
+  source: "mock" | "ca-app";
+  /** The source's id for this revision. */
+  externalRef: string;
+  /** True while the source says this is its section's current revision. Never inferred. */
+  isCurrent: boolean;
+  /** When the source published it. */
+  uploadedAt?: string;
+  /** When the server last confirmed it against the source. */
+  syncedAt: string;
+};
+
+/** True for a set whose pages have been listed as sheets. */
+export function isSetIndexed(set: Pick<CaDrawingSet, "indexed">): boolean {
+  return set.indexed !== false;
+}
+
+/**
+ * The drawing-set version a report was made with. Recorded when the report
+ * is started, so the report keeps showing (and printing) that version's
+ * sheets after a newer set arrives.
+ */
+export type CaReportDrawingSet = {
+  setId: string;
+  /** As labelled by the source, e.g. "v3 — 100% CD". Printed on the report. */
+  revisionLabel?: string;
+  title?: string;
 };
 
 /**
@@ -266,6 +333,8 @@ export type CaReportContent = {
    * whole sheet; higher values zoom in around the pin. Absent means 1.
    */
   locationZoom?: Record<string, number>;
+  /** The drawing-set version this report uses. Absent on older reports. */
+  drawingSet?: CaReportDrawingSet;
 };
 
 /**

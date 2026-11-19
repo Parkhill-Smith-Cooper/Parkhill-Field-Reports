@@ -209,4 +209,74 @@ describe.each(implementations)("CA repository contract: %s", (_name, make) => {
     expect((await repo.drawingSets.list(PROJECT)).map((s) => s.removed)).toEqual([true]);
     expect(await repo.drawingSets.remove(PROJECT, "caset_missing", "eng")).toBeNull();
   });
+
+  it("spec sections: create-only, ordered by number then revision, kept apart from drawing sets", async () => {
+    const repo = await withProject();
+    const section = (id: string, sectionKey: string, revision: number) => ({
+      id,
+      projectNumber: PROJECT,
+      sectionKey,
+      sectionNumber: `${sectionKey.slice(0, 2)} ${sectionKey.slice(2, 4)} ${sectionKey.slice(4, 6)}`,
+      division: sectionKey.slice(0, 2),
+      title: `Section ${sectionKey}`,
+      revision,
+      fileName: `${sectionKey}.pdf`,
+      filePath: `${PROJECT}/specifications/${id}.pdf`,
+      sizeBytes: 10,
+      source: "ca-app" as const,
+      externalRef: `ref-${id}`,
+      isCurrent: false,
+      syncedAt: "2026-11-19T00:00:00.000Z",
+    });
+    await repo.specSections.create(section("dcspec_b1", "051200", 1));
+    await repo.specSections.create(section("dcspec_a1", "033000", 1));
+    await repo.specSections.create(section("dcspec_a2", "033000", 2));
+    // A retried create returns what is stored and changes nothing.
+    expect(await repo.specSections.create({ ...section("dcspec_a1", "033000", 1), title: "Other" })).toMatchObject({
+      title: "Section 033000",
+    });
+    expect((await repo.specSections.list(PROJECT)).map((s) => s.id)).toEqual(["dcspec_a2", "dcspec_a1", "dcspec_b1"]);
+
+    const updated = await repo.specSections.update(PROJECT, "dcspec_a2", (s) => ({ ...s, isCurrent: true, id: "x" }));
+    expect(updated).toMatchObject({ id: "dcspec_a2", isCurrent: true });
+    expect(updated).not.toHaveProperty("type");
+    expect(await repo.specSections.update(PROJECT, "dcspec_missing", (s) => s)).toBeNull();
+    expect(await repo.specSections.get(PROJECT, "dcspec_missing")).toBeNull();
+
+    // Sections are neither drawing sets nor drawings, and go with the project.
+    expect(await repo.drawingSets.list(PROJECT)).toEqual([]);
+    expect(await repo.drawings.list(PROJECT)).toEqual([]);
+    await repo.projects.delete(PROJECT);
+    expect(await repo.specSections.list(PROJECT)).toEqual([]);
+  });
+
+  it("drawing sets: update is atomic, keeps the id, and null changes nothing", async () => {
+    const repo = await withProject();
+    await repo.drawingSets.create({
+      id: "dcset_1",
+      projectNumber: PROJECT,
+      fileName: "CD.pdf",
+      filePath: `${PROJECT}/drawing-sets/dcset_1.pdf`,
+      sizeBytes: 10,
+      pageCount: 0,
+      sheets: [],
+      uploadedAt: "2026-11-19T10:00:00.000Z",
+      uploadedBy: "sync",
+      source: "mock",
+      externalRef: "v1",
+      isCurrent: false,
+      indexed: false,
+    });
+    // Two writers at once: neither change is lost.
+    await Promise.all([
+      repo.drawingSets.update(PROJECT, "dcset_1", (s) => ({ ...s, isCurrent: true })),
+      repo.drawingSets.update(PROJECT, "dcset_1", (s) => ({ ...s, revisionLabel: "v1 — CD" })),
+    ]);
+    expect(await repo.drawingSets.get(PROJECT, "dcset_1")).toMatchObject({ isCurrent: true, revisionLabel: "v1 — CD" });
+    // The id and project cannot be changed through update.
+    await repo.drawingSets.update(PROJECT, "dcset_1", (s) => ({ ...s, id: "other", projectNumber: "X" }));
+    expect(await repo.drawingSets.get(PROJECT, "dcset_1")).toMatchObject({ id: "dcset_1", projectNumber: PROJECT });
+    expect(await repo.drawingSets.update(PROJECT, "dcset_1", () => null)).toMatchObject({ isCurrent: true });
+    expect(await repo.drawingSets.update(PROJECT, "missing", (s) => s)).toBeNull();
+  });
 });
